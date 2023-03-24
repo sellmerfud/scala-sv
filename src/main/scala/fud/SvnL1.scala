@@ -103,20 +103,16 @@ object SvnL1 {
       0
     
 
-    def buildPrefix(revision: String, author: String, date: String, time: String, useColor: Boolean): String = {
-        val revColor     = if (useColor) YELLOW else ""
-        val authorColor  = if (useColor) CYAN   else ""
-        val dateColor    = if (useColor) PURPLE else ""
-        val reset        = if (useColor) RESET  else ""
+    def buildPrefix(revision: String, author: String, date: String, time: String): String = {
         val revFormat    = s"%-${maxRevLen}s"
         val authorFormat = s"%-${maxAuthorLen}s"
         val dateStr      = if (options.time) s"$date $time" else date
         
         (options.author, options.date) match {
-          case (true, true)  => s"${revColor}${revFormat}${reset} ${authorColor}${authorFormat}${reset} ${dateColor}%s${reset}".format(revision, author, dateStr)
-          case (true, false) => s"${revColor}${revFormat}${reset} ${authorColor}${authorFormat}${reset}".format(revision, author)
-          case (false, true) => s"${revColor}${revFormat}${reset} ${dateColor}%s${reset}".format(revision, dateStr)
-          case _             => s"${revColor}${revFormat}${reset}".format(revision)
+          case (true, true)  => s"${yellow}${revFormat}${reset} ${cyan}${authorFormat}${reset} ${purple}%s${reset}".format(revision, author, dateStr)
+          case (true, false) => s"${yellow}${revFormat}${reset} ${cyan}${authorFormat}${reset}".format(revision, author)
+          case (false, true) => s"${yellow}${revFormat}${reset} ${purple}%s${reset}".format(revision, dateStr)
+          case _             => s"${yellow}${revFormat}${reset}".format(revision)
         }
     }
     
@@ -128,18 +124,14 @@ object SvnL1 {
       //  Get just the date, stripping of the time
       val date     = """^[^T]+""".r.findFirstIn((entry \ "date").head.text) getOrElse ""
       val time     = """(?<=T)[^.]+""".r.findFirstIn((entry \ "date").head.text) getOrElse ""
-      
-      // generate prefix without color to get column offset for msgs
-      val plainPrefix = buildPrefix(revision, author, date, time, false)
-      val margin      = " " * plainPrefix.length
-      val prefix      = if (withColor) buildPrefix(revision, author, date, time, true)
-                        else           plainPrefix
+      val prefix   = buildPrefix(revision, author, date, time)
 
-      println(s"${prefix} ${msg1st}")
-      if (options.full && fullMsg.size > 1) {
-        for (line <- (fullMsg drop 1))
-          println(s"${margin} ${line}")
+      if (options.full) {
+        println(prefix)
+        fullMsg foreach (line => println(s"  $line"))
       }
+      else
+        println(s"${prefix} ${msg1st}")
       
       if (options.paths) {
         for (pathEntry <- (entry \ "paths" \ "path")) {
@@ -170,7 +162,7 @@ object SvnL1 {
                        |  -f, --full       : displays the full commit message
                        |  -p, --paths      : displays the affected paths
                        |  -i, --incoming   : displays commits incoming with next update
-                       |  -v, --verbose    : same as --author --date --full
+                       |  -v, --verbose    : same as --author --time --full
                        |      --show       : show the svn log command but do not execute it
                        |  -h, --help       : display usage and exit.""".stripMargin
   
@@ -193,7 +185,7 @@ object SvnL1 {
           case 'f'                    => options = options.copy(full = true); nextChar
           case 'p'                    => options = options.copy(paths = true); nextChar
           case 'i'                    => cmdLine :+= "-rHEAD:BASE"; nextChar
-          case 'v'                    => options = options.copy(author = true, date = true, full = true); nextChar
+          case 'v'                    => options = options.copy(author = true, date = true, time = true, full = true); nextChar
           case 'r' | 'c' | 'l' | 'x'  => cmdLine :+= s"-$letters" // These are followed by an argument...
           case ch if ignoredShort(ch) => nextChar
           case ch if isDigit(ch)      =>
@@ -213,7 +205,7 @@ object SvnL1 {
       case "--full"                => options = options.copy(full = true)
       case "--incoming"            => cmdLine :+= "-rHEAD:BASE"
       case "--paths"               => options = options.copy(paths = true)
-      case "--verbose"             => options = options.copy(author = true, date = true, full = true)
+      case "--verbose"             => options = options.copy(author = true, date = true, time = true, full = true)
       case "--show"                => options = options.copy(show = true)
       case arg if ignoredLong(arg) =>
       case arg if singleDash(arg)  => singleLettersArgs(arg drop 1)
