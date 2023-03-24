@@ -1,0 +1,6 @@
+#!/bin/sh
+
+
+# Export LIB_DIR so the loader can find the jar files
+export LIB_DIR="`dirname $0`/lib"
+java -jar "$LIB_DIR/loader.jar" "$@"
