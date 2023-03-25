@@ -1,6 +1,6 @@
 
 
-package fud
+package svutil
 
 import java.io.IOException
 import scala.collection.mutable.ListBuffer
@@ -8,7 +8,10 @@ import scala.sys.process.{ Process, ProcessBuilder, ProcessLogger }
 import scala.util.matching.Regex
 
 
-object SvnL1 {
+object SvnL1 extends Command {
+  
+  override val name = "l1"
+  override val description = "Display formatted subversion log messages"
   
   //  By default we use ANSI color escape codes unless we are not connected
   //  to a console or if the user has explicitly forbidden it.
@@ -154,17 +157,23 @@ object SvnL1 {
   }
   
   
-  val usageString = """|usage: svnl1 [options] [path...]
-                       |  -{number}        : limits the number of log entries to {number}
-                       |  -a, --author     : displays the user who made the commit
-                       |  -d, --date       : displays the date for each commit
-                       |  -t, --time       : displays the date and time for each commit
-                       |  -f, --full       : displays the full commit message
-                       |  -p, --paths      : displays the affected paths
-                       |  -i, --incoming   : displays commits incoming with next update
-                       |  -v, --verbose    : same as --author --time --full
-                       |      --show       : show the svn log command but do not execute it
-                       |  -h, --help       : display usage and exit.""".stripMargin
+  def showUsage(): Unit = {
+    val scriptName = sys.props.getOrElse("svutil.script.name", "sv")
+    
+    val usage = s"""|usage: $scriptName l1 [<options>] [<path>]
+                    |  -{number}        : limits the number of log entries to {number}
+                    |  -a, --author     : displays the user who made the commit
+                    |  -d, --date       : displays the date for each commit
+                    |  -t, --time       : displays the date and time for each commit
+                    |  -f, --full       : displays the full commit message
+                    |  -p, --paths      : displays the affected paths
+                    |  -i, --incoming   : displays commits incoming with next update
+                    |  -v, --verbose    : same as --author --time --full
+                    |  -h, --help       : display usage and exit.
+                    |  <path>           : default is the current directory""".stripMargin
+    println(usage)
+    println("\nAll other arguments are passed through to the svn log command")
+  }
   
   
   def processCommandLine(args: Seq[String]): (Seq[String], Options) = {
@@ -178,7 +187,7 @@ object SvnL1 {
       import Character.isDigit
       def nextChar = singleLettersArgs(letters drop 1)
         letters(0) match {
-          case 'h'                    => println(usageString); sys.exit(0)
+          case 'h'                    => showUsage(); sys.exit(0)
           case 'a'                    => options = options.copy(author = true); nextChar
           case 'd'                    => options = options.copy(date = true); nextChar
           case 't'                    => options = options.copy(date = true, time = true); nextChar
@@ -197,7 +206,7 @@ object SvnL1 {
     }
   
     args foreach {
-      case "--help"                => println(usageString); sys.exit(0)
+      case "--help"                => showUsage(); sys.exit(0)
       case "--quiet"               => // Ignore these svn args as they do not apply
       case "--author"              => options = options.copy(author = true)
       case "--date"                => options = options.copy(date = true)
@@ -221,9 +230,8 @@ object SvnL1 {
   }
   
   
-  def main(args: Array[String]): Unit = {
-  
-    val (cmdLine, options) = processCommandLine(args.toSeq)
+  override def run(args: Seq[String]): Int = {
+    val (cmdLine, options) = processCommandLine(args)
     val status = if (options.show) {
       println(cmdLine mkString " ")
       0
@@ -238,6 +246,6 @@ object SvnL1 {
       status
     }
     
-    sys.exit(status)
+    status
   } 
 }

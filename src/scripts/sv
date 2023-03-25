@@ -1,0 +1,7 @@
+#!/bin/sh
+
+
+# Export LIB_DIR so the loader can find the jar files
+LIB_DIR="`dirname $0`/lib"
+BASE_NAME=`basename $0`
+java -D"loader.lib=$LIB_DIR" -D"loader.mainClass=svutil.Main" -D"svutil.script.name=$BASE_NAME" -jar "$LIB_DIR/loader.jar" "$@"

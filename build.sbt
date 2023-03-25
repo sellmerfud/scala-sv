@@ -12,21 +12,22 @@ lazy val stage         = taskKey[Unit]("Create distribution zip file")
 lazy val sourceScripts = settingKey[File]("Other source file included in the package")
 
 
-lazy val svnl1 = (project in file("."))
+lazy val svutil = (project in file("."))
   .settings(
     commonSettings,
-    name        := "svnl1",
-    description := "Subversion logging utility",
+    name        := "sv",
+    description := "Subversion utilities",
     scalacOptions       ++= Seq( "-deprecation", "-unchecked", "-feature" ),
     libraryDependencies ++= Seq(
       "org.scala-lang.modules" %% "scala-xml" % "2.1.0"
     ),
     sourceScripts := sourceDirectory.value / "scripts",
+    (Compile / mainClass) := None,
     Compile / resourceGenerators += Def.task {
       val versFile = (Compile / resourceManaged).value / "version"
       IO.write(versFile, version.value)
       Seq(versFile)
-      }.taskValue,
+    }.taskValue,
     
     // Task to create the distribution zip file
     Compile / stage := {
@@ -37,7 +38,7 @@ lazy val svnl1 = (project in file("."))
         val mapper: FileMap = Path.flat(directory)
         mapper(origfile)
       }
-      val pkgDir     = target.value / s"svnl1-${version.value}"
+      val pkgDir     = target.value / s"svutil-${version.value}"
       val lib        = pkgDir / "lib"
       val loader_jar = (loader / Compile / packageBin / artifactPath).value
       val zipfile    = file(s"${pkgDir.getAbsolutePath}.zip")
