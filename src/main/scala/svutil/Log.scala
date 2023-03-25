@@ -6,9 +6,9 @@ import scala.util.matching.Regex
 import scala.util.Properties.propOrElse
 import Color._
 
-object SvnL1 extends Command {
+object Log extends Command {
   
-  override val name = "l1"
+  override val name = "log"
   override val description = "Display formatted subversion log messages"
   
   case class Options(
@@ -96,7 +96,7 @@ object SvnL1 extends Command {
   def showUsage(): Unit = {
     val scriptName = propOrElse("svutil.script.name", "sv")
     
-    val usage = s"""|usage: $scriptName l1 [<options>] [<path>]
+    val usage = s"""|usage: $scriptName $name [<options>] [<path>]
                     |  -{number}        : limits the number of log entries to {number}
                     |  -a, --author     : displays the user who made the commit
                     |  -d, --date       : displays the date for each commit

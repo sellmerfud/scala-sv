@@ -26,7 +26,7 @@ object Branch extends Command {
     
     try {
       val parser = new OptionParser[Options] {
-        banner = s"usage: $scriptName br [<options>] [<path> | <url>]"
+        banner = s"usage: $scriptName $name [<options>] [<path> | <url>]"
         
         flag("-b", "--branches", "Dispaly list of branches in the repo")
             { _.copy(branches = true) }
@@ -36,11 +36,16 @@ object Branch extends Command {
             
         reqd[String]("-p", "--prefix=<string>", "Only list entries that begin with <string>")
           { (string, options) => options.copy(prefix = Some(string)) }
+
+        flag("-h", "--help", "Show this message")
+            { _ => println(help); sys.exit(0) }
       
         arg[String] { (path, options) => options.copy(path = path) }  
           
         separator("")
-        separator("Assumes the repo has standard /trunk, /branches, /tags structure")
+        separator("If neither of --branches or --tags is present, the current branch is displayed.")
+        separator("If <path> is omitted the current directory is used by default.")
+        separator("Assumes the repo has standard /trunk, /branches, /tags structure.")
       }
       
       Some(parser.parse(args, Options()))

@@ -31,7 +31,7 @@ object Main {
     }
   }
   
-  lazy val commands = SvnL1 :: Branch :: Nil
+  lazy val commands = Log :: Branch :: Nil
   
   def showHelp(scriptName: String): Unit = {
     val usage = s"""|usage: $scriptName [-v | --version]
