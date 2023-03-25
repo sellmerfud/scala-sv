@@ -8,8 +8,8 @@ lazy val commonSettings = Seq(
   scalaVersion := "2.13.10"
 )
 
-lazy val stage        = taskKey[Unit]("Create distribution zip file")
-lazy val sourceOther  = settingKey[File]("Other source file included in the package")
+lazy val stage         = taskKey[Unit]("Create distribution zip file")
+lazy val sourceScripts = settingKey[File]("Other source file included in the package")
 
 
 lazy val svnl1 = (project in file("."))
@@ -21,7 +21,7 @@ lazy val svnl1 = (project in file("."))
     libraryDependencies ++= Seq(
       "org.scala-lang.modules" %% "scala-xml" % "2.1.0"
     ),
-    sourceOther := sourceDirectory.value / "other",
+    sourceScripts := sourceDirectory.value / "scripts",
     Compile / resourceGenerators += Def.task {
       val versFile = (Compile / resourceManaged).value / "version"
       IO.write(versFile, version.value)
@@ -42,15 +42,18 @@ lazy val svnl1 = (project in file("."))
       val loader_jar = (loader / Compile / packageBin / artifactPath).value
       val zipfile    = file(s"${pkgDir.getAbsolutePath}.zip")
       val jars       = (Compile / fullClasspathAsJars).value.files
-      val others     = (sourceOther.value * "*").get
-      val assets     = (others pair rebaseTo(pkgDir)) ++ (jars pair rebaseTo(lib))
+      val scripts    = (sourceScripts.value * "*").get
+      val assets     = (scripts pair rebaseTo(pkgDir)) ++ (jars pair rebaseTo(lib))
       
       log.info(s"Staging to $pkgDir ...")
       IO.delete(pkgDir)
       IO.createDirectory(lib)
       IO.copyFile(loader_jar, lib / loader_jar.getName)
       IO.copy(assets, CopyOptions().withOverwrite(true))
-      IO.setPermissions(pkgDir / "svnl1", "rwxr-xr-x") // Make bash script executable
+      // Make bash scripts executable
+      for (script <- scripts; pkgScript = rebaseTo(pkgDir)(script).get)
+        IO.setPermissions(pkgScript, "rwxr-xr-x") 
+      
       // Create zip file
       (pkgDir ** ".DS_Store").get foreach IO.delete
       val zipEntries = (pkgDir ** "*").get map (f => (f, IO.relativize(target.value, f).get) )
