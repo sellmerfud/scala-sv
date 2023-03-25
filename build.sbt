@@ -19,7 +19,8 @@ lazy val svutil = (project in file("."))
     description := "Subversion utilities",
     scalacOptions       ++= Seq( "-deprecation", "-unchecked", "-feature" ),
     libraryDependencies ++= Seq(
-      "org.scala-lang.modules" %% "scala-xml" % "2.1.0"
+      "org.scala-lang.modules" %% "scala-xml" % "2.1.0",
+      "org.sellmerfud"         %% "optparse"  % "2.2"
     ),
     sourceScripts := sourceDirectory.value / "scripts",
     (Compile / mainClass) := None,

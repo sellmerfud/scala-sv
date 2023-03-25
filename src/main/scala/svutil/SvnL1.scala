@@ -2,78 +2,14 @@
 
 package svutil
 
-import java.io.IOException
-import scala.collection.mutable.ListBuffer
-import scala.sys.process.{ Process, ProcessBuilder, ProcessLogger }
 import scala.util.matching.Regex
-
+import scala.util.Properties.propOrElse
+import Color._
 
 object SvnL1 extends Command {
   
   override val name = "l1"
   override val description = "Display formatted subversion log messages"
-  
-  //  By default we use ANSI color escape codes unless we are not connected
-  //  to a console or if the user has explicitly forbidden it.
-  lazy val withColor = {
-    val x = sys.env.getOrElse("SVNL1_COLOR", "yes").toLowerCase.headOption.getOrElse('y')
-    System.console != null && "yt1".toSet(x)
-  }
-      
-  val RED    = "\u001b[31m"
-  val GREEN  = "\u001b[32m"
-  val YELLOW = "\u001b[33m"
-  val BLUE   = "\u001b[34m"
-  val PURPLE = "\u001b[35m"
-  val CYAN   = "\u001b[36m"
-  val WHITE  = "\u001b[37m"
-  val GREY   = "\u001b[90m"
-  val RESET  = "\u001b[0m" 
-      
-  def colorize(color: String) = if (withColor) color else ""   
-  
-  lazy val red    = colorize(RED)
-  lazy val green  = colorize(GREEN)
-  lazy val yellow = colorize(YELLOW)
-  lazy val blue   = colorize(BLUE)
-  lazy val purple = colorize(PURPLE)
-  lazy val cyan   = colorize(CYAN)
-  lazy val white  = colorize(WHITE)
-  lazy val grey   = colorize(GREY)
-  lazy val reset  = colorize(RESET)
-  
-  
-   // Used to capture process output.
-  private class ExecLogger extends ProcessLogger {
-    private val outbuf = new ListBuffer[String]
-    private val errbuf = new ListBuffer[String]
-    def stdout: Seq[String] = outbuf.toList
-    def stderr: Seq[String] = errbuf.toList
-    def buffer[T](f: => T): T = f
-    def err(s: => String): Unit = errbuf += s
-    def out(s: => String): Unit = outbuf += s
-  }
-  
-  private def findRootCause(e: Throwable): Throwable =
-    if (e.getCause == null || e.getCause == e) return e else return findRootCause(e.getCause)
-
-  private def exec(command: Seq[String]): (Int, Seq[String], Seq[String]) = {
-    val logger = new ExecLogger
-    try {
-      val status = Process(command) ! logger
-      (status, logger.stdout, logger.stderr)
-    }
-    catch {
-      case t: Throwable => findRootCause(t) match {
-        case e: IOException if e.getMessage != null => """error=(\d+)""".r.findFirstMatchIn(e.getMessage) match {
-          case Some(m) => (m.group(1).toInt, List(), List(e.getMessage))
-          case _ => (-1, List(), List(e.getMessage))
-        }
-        case e: IOException => (-1, List(), List())
-      }
-    }
-    
-  }
   
   case class Options(
     author: Boolean = false,
@@ -112,10 +48,10 @@ object SvnL1 extends Command {
         val dateStr      = if (options.time) s"$date $time" else date
         
         (options.author, options.date) match {
-          case (true, true)  => s"${yellow}${revFormat}${reset} ${cyan}${authorFormat}${reset} ${purple}%s${reset}".format(revision, author, dateStr)
-          case (true, false) => s"${yellow}${revFormat}${reset} ${cyan}${authorFormat}${reset}".format(revision, author)
-          case (false, true) => s"${yellow}${revFormat}${reset} ${purple}%s${reset}".format(revision, dateStr)
-          case _             => s"${yellow}${revFormat}${reset}".format(revision)
+          case (true, true)  => s"${yellow(revFormat)} ${cyan(authorFormat)} ${purple("%s")}".format(revision, author, dateStr)
+          case (true, false) => s"${yellow(revFormat)} ${cyan(authorFormat)}".format(revision, author)
+          case (false, true) => s"${yellow(revFormat)} ${purple("%s")}".format(revision, dateStr)
+          case _             => s"${yellow(revFormat)}".format(revision)
         }
     }
     
@@ -139,10 +75,10 @@ object SvnL1 extends Command {
       if (options.paths) {
         for (pathEntry <- (entry \ "paths" \ "path")) {
           val action = pathEntry.attributes("action").head.text
-          val actionColor = action match {
-            case "D" => red
-            case "A" => green
-            case _   => white
+          val coloredAction = action match {
+            case "D" => red("D")
+            case "A" => green("A")
+            case _   => white(action)
           }
           val path     = pathEntry.head.text
           val fromPath = Option(pathEntry.attributes("copyfrom-path")) flatMap (_.headOption) map (_.text) getOrElse ""
@@ -150,7 +86,7 @@ object SvnL1 extends Command {
           val from     = if (fromPath != "") s"  (from ${fromPath}:${fromRev})"
                          else                ""
 
-          println(s"  ${actionColor}${action} ${blue}${path}${red}${from}${reset}")
+          println(s"  ${coloredAction} ${blue(path)}${red(from)}")
         }
       }
     }
@@ -158,7 +94,7 @@ object SvnL1 extends Command {
   
   
   def showUsage(): Unit = {
-    val scriptName = sys.props.getOrElse("svutil.script.name", "sv")
+    val scriptName = propOrElse("svutil.script.name", "sv")
     
     val usage = s"""|usage: $scriptName l1 [<options>] [<path>]
                     |  -{number}        : limits the number of log entries to {number}
@@ -237,6 +173,7 @@ object SvnL1 extends Command {
       0
     }
     else {
+      import Exec.exec
       val (status, out, err) = exec(cmdLine)
     
       if (status == 0)
