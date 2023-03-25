@@ -43,10 +43,6 @@ import java.util.Iterator;
 // new class loader loads the main program.
 
 public class Loader {
-
-  // Class to load with main entry point.
-  private static final String APP_CLASS = "fud.SvnL1";
-  
   
   public static void main(String[] args) {
     Loader instance = new Loader();
@@ -98,7 +94,17 @@ public class Loader {
   //  call 'lib' which contains the jar files needed to run the application.
   //  The script that invokes this Loader is responsible for doing that.
   private int startApplication(String[] args) {
-    String libPath = System.getenv("LIB_DIR") == null ? "./lib" : System.getenv("LIB_DIR");
+    final String MAINCLASS_PROPERTY = "loader.mainClass";
+    final String LIB_PROPERTY       = "loader.lib";
+    String mainClass = System.getProperty(MAINCLASS_PROPERTY);
+    String libPath   = System.getProperty(LIB_PROPERTY);
+
+    if (mainClass == null)
+      error(String.format("System property '%s' must be defined.", MAINCLASS_PROPERTY));
+    
+    if (libPath == null)
+      error(String.format("System property '%s' must be defined.", LIB_PROPERTY));
+    
     File libDir = new File(libPath);
     if (!libDir.isDirectory())
       error("Cannot find directory: " + libPath);
@@ -128,9 +134,9 @@ public class Loader {
     }
 
     Class<?> applicationClass = null;
-    try { applicationClass = cl.loadClass(APP_CLASS); }
+    try { applicationClass = cl.loadClass(mainClass); }
     catch (ClassNotFoundException e) {
-      error("Unable to load " + APP_CLASS + ": " + e.getMessage());
+      error("Unable to load " + mainClass + ": " + e.getMessage());
    }
         
     // We have successfully loaded the class, now use Reflection
@@ -145,7 +151,7 @@ public class Loader {
     }
     catch (Exception e) {
       e.printStackTrace();
-      error("Unable to invoke " + APP_CLASS + ".main(): " + e.getMessage());
+      error("Unable to invoke " + mainClass + ".main(): " + e.getMessage());
       return 1;
     }
   }

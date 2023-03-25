@@ -3,4 +3,4 @@
 
 # Export LIB_DIR so the loader can find the jar files
 export LIB_DIR="`dirname $0`/lib"
-java -jar "$LIB_DIR/loader.jar" "$@"
+java -D"loader.lib=$LIB_DIR" -D"loader.mainClass=fud.SvnL1" -jar "$LIB_DIR/loader.jar" "$@"
