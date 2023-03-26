@@ -7,6 +7,8 @@ import scala.collection.mutable.ListBuffer
 
 
 object Exec {
+
+  case class ExecError(err: Int, stderr: Seq[String]) extends Exception("Exec Error")
   
    // Used to capture process output.
   private class ExecLogger extends ProcessLogger {
@@ -40,6 +42,15 @@ object Exec {
         }
         case e: IOException => (-1, List(), List())
       }
+    }
+  }
+  
+  //  Execute the command and return the commands stdout
+  //  If the command fails, throw an ExecError
+  def runCmd(command: Seq[String]): Seq[String] = {
+    exec(command) match {
+      case (0, stdout, _)   => stdout
+      case (err, _, stderr) => throw ExecError(err, stderr)
     }
   }
 }

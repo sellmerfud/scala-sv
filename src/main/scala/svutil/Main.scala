@@ -3,6 +3,9 @@ package svutil
 
 import java.io.{ IOException, BufferedReader, InputStreamReader }
 import scala.util.Properties.propOrElse
+import svutil.exceptions._
+import Exec.ExecError
+import org.sellmerfud.optparse.OptionParserException
 
 object Main {
 
@@ -31,7 +34,7 @@ object Main {
     }
   }
   
-  lazy val commands = Log :: Branch :: Nil
+  lazy val commands = Log :: Branch :: Ignore :: Nil
   
   def showHelp(scriptName: String): Unit = {
     val usage = s"""|usage: $scriptName [-v | --version]
@@ -47,8 +50,8 @@ object Main {
       println(s"\nFor help about a particular command use $scriptName <command> --help")
   }
   
-  val STATUS_OK          = 0
-  val STATUS_INVALID_CMD = 1
+  val STATUS_OK  = 0
+  val STATUS_BAD = 1
     
     
   def main(args: Array[String]): Unit = {
@@ -68,11 +71,36 @@ object Main {
     else {
       commands.find(_.name == cmdName) match {
         case None =>
-          println(s"$scriptName: '$cmdName' is not a $scriptName command.  See '$scriptName --help'.")
-          STATUS_INVALID_CMD
+          System.err.println(s"$scriptName: '$cmdName' is not a $scriptName command.  See '$scriptName --help'.")
+          STATUS_BAD
           
         case Some(command) =>
-          command.run(cmdArgs.tail)
+          try {
+            command.run(cmdArgs.tail)
+            STATUS_OK
+          }
+          catch {
+            case ExecError(errStatus, stderr) =>
+              stderr foreach System.err.println
+              errStatus
+              
+            case e: OptionParserException =>
+              System.err.println(e.getMessage)
+              STATUS_BAD
+              
+            case HelpException() =>
+              // User used --help option for the command
+              STATUS_OK
+              
+            case GeneralError(reason) =>
+              if (reason != "")
+                System.err.println(reason)
+              STATUS_BAD
+              
+            case e: Throwable =>
+              System.err.println(Option(e.getMessage) getOrElse e.getClass.getName)
+              STATUS_BAD
+          }
       }
     }
     

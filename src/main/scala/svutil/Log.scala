@@ -5,6 +5,8 @@ package svutil
 import scala.util.matching.Regex
 import scala.util.Properties.propOrElse
 import Color._
+import Exec.runCmd
+import svutil.exceptions._
 
 object Log extends Command {
   
@@ -123,7 +125,7 @@ object Log extends Command {
       import Character.isDigit
       def nextChar = singleLettersArgs(letters drop 1)
         letters(0) match {
-          case 'h'                    => showUsage(); sys.exit(0)
+          case 'h'                    => showUsage(); throw HelpException()
           case 'a'                    => options = options.copy(author = true); nextChar
           case 'd'                    => options = options.copy(date = true); nextChar
           case 't'                    => options = options.copy(date = true, time = true); nextChar
@@ -142,7 +144,7 @@ object Log extends Command {
     }
   
     args foreach {
-      case "--help"                => showUsage(); sys.exit(0)
+      case "--help"                => showUsage(); throw HelpException()
       case "--quiet"               => // Ignore these svn args as they do not apply
       case "--author"              => options = options.copy(author = true)
       case "--date"                => options = options.copy(date = true)
@@ -166,23 +168,11 @@ object Log extends Command {
   }
   
   
-  override def run(args: Seq[String]): Int = {
+  override def run(args: Seq[String]): Unit = {
     val (cmdLine, options) = processCommandLine(args)
-    val status = if (options.show) {
+    val status = if (options.show)
       println(cmdLine mkString " ")
-      0
-    }
-    else {
-      import Exec.exec
-      val (status, out, err) = exec(cmdLine)
-    
-      if (status == 0)
-        showResults(out.mkString("\n"), options)
-      else
-        err foreach println
-      status
-    }
-    
-    status
+    else
+      showResults(runCmd(cmdLine).mkString("\n"), options)    
   } 
 }
