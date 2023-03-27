@@ -19,7 +19,7 @@ object Main {
         case cl => cl
       }
     
-    Option(classLoader.getResourceAsStream("version")) match {
+    Option(classLoader.getResourceAsStream("svutil/version")) match {
       case None           => "Missing"
       case Some(resource) =>
         try {

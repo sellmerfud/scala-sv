@@ -17,15 +17,17 @@ lazy val root = (project in file("."))
     commonSettings,
     name        := "sv",
     description := "Subversion utilities",
+    assembly / mainClass := Some("svutil.Main"),
+    assembly / assemblyJarName := "svutil.jar",
     scalacOptions       ++= Seq( "-deprecation", "-unchecked", "-feature" ),
     libraryDependencies ++= Seq(
       "org.scala-lang.modules" %% "scala-xml" % "2.1.0",
       "org.sellmerfud"         %% "optparse"  % "2.2"
     ),
     sourceScripts := sourceDirectory.value / "scripts",
-    (Compile / mainClass) := None,
+    // (Compile / mainClass) := None,
     Compile / resourceGenerators += Def.task {
-      val versFile = (Compile / resourceManaged).value / "version"
+      val versFile = (Compile / resourceManaged).value / "svutil" / "version"
       IO.write(versFile, version.value)
       Seq(versFile)
     }.taskValue,
@@ -33,45 +35,34 @@ lazy val root = (project in file("."))
     // Task to create the distribution zip file
     Compile / stage := {
       val log = streams.value.log
-      (loader / Compile / packageBin).value  // Depends on the loader package being built
-      (Compile / packageBin).value           // Depends on the main package being built
+      assembly.value           // Depends on the main package being built and assembled
       def rebaseTo(directory: File)(origfile: File): Option[File] = {
         val mapper: FileMap = Path.flat(directory)
         mapper(origfile)
       }
       val pkgDir     = target.value / s"sv-${version.value}"
-      val lib        = pkgDir / "svlib"
-      val loader_jar = (loader / Compile / packageBin / artifactPath).value
+      val assemblyFile = (assembly / assemblyOutputPath).value
       val zipfile    = file(s"${pkgDir.getAbsolutePath}.zip")
-      val jars       = (Compile / fullClasspathAsJars).value.files
       val scripts    = (sourceScripts.value * "*").get
-      val assets     = (scripts pair rebaseTo(pkgDir)) ++ (jars pair rebaseTo(lib))
-      
+      val assets     = (scripts pair rebaseTo(pkgDir)) :+ (assemblyFile -> rebaseTo(pkgDir)(assemblyFile).get)
+
       log.info(s"Staging to $pkgDir ...")
       IO.delete(pkgDir)
-      IO.createDirectory(lib)
-      IO.copyFile(loader_jar, lib / loader_jar.getName)
+      IO.delete(zipfile)
       IO.copy(assets, CopyOptions().withOverwrite(true))
       // Make bash scripts executable
       for (script <- scripts; pkgScript = rebaseTo(pkgDir)(script).get)
-        IO.setPermissions(pkgScript, "rwxr-xr-x") 
-      
+        IO.setPermissions(pkgScript, "rwxr-xr-x")
+
       // Create zip file
       (pkgDir ** ".DS_Store").get foreach IO.delete
-      val zipEntries = (pkgDir ** "*").get map (f => (f, IO.relativize(target.value, f).get) )
-      IO.zip(zipEntries, zipfile, None)
+      // IO.zip does not preserve the executable file permission on the script file
+      // val zipEntries = (pkgDir ** "*").get map (f => (f, IO.relativize(target.value, f).get) )
+      // IO.zip(zipEntries, zipfile, None)
+      // Relative to pkgDir (rather than target) so the files are not beeath a directory
+      Utilities.createZipFile(zipfile, pkgDir, (pkgDir ** "*").get map (f => IO.relativizeFile(pkgDir, f).get))
     }
-  )
-  
-  lazy val loader = (project in file("loader"))
-    .settings(
-      commonSettings,
-      name        := "Loader",
-      description := "Bootstrap loader",
-      (Compile / mainClass) := Some("loader.Loader"),
-      // Make loader.jar generic without version number so the scripts can find it.
-      (Compile / packageBin / artifactPath) := (Compile / target).value / "loader.jar"
-    )
+  )  
 
 
 
