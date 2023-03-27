@@ -20,7 +20,7 @@ object Color {
   val PURPLE = "\u001b[35m"
   val CYAN   = "\u001b[36m"
   val WHITE  = "\u001b[37m"
-  val GREY   = "\u001b[90m"
+  val GRAY   = "\u001b[90m"
   val RESET  = "\u001b[0m" 
       
   private def withColor(color: String, str: String): String =
@@ -36,6 +36,6 @@ object Color {
   def purple(str: String) = withColor(PURPLE, str)
   def cyan(str: String)   = withColor(CYAN, str)
   def white(str: String)  = withColor(WHITE, str)
-  def grey(str: String)   = withColor(GREY, str)
+  def gray(str: String)   = withColor(GRAY, str)
   def reset(str: String)  = withColor(RESET, str)
 }

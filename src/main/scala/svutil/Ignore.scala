@@ -9,6 +9,7 @@ import scala.xml._
 import Exec.{ runCmd, ExecError }
 import Color._
 import svutil.exceptions._
+import Utilities._
 
 object Ignore extends Command {
   
@@ -38,23 +39,6 @@ object Ignore extends Command {
     parser.parse(args, Options())
   }
   
-  implicit class StringWrapper(str: String) {
-    def chomp(suffix: String = "\n"): String = suffix match {
-      case null | "" => str
-      case "\n" if str.endsWith("\r\n") => str.reverse.drop(2).reverse.toString
-      case "\n" if str.endsWith("\r") || str.endsWith("\n") => str.reverse.drop(1).reverse.toString
-      case suf   if str.endsWith(suf) => str.reverse.drop(suf.length).reverse.toString
-      case _ => str
-    }
-  }
-  
-  private def joinPaths(base: String, others: String*): String = {
-    val result = new StringBuilder(base.chomp("/"))
-    for (segment <- others)
-      result.append("/").append(segment.chomp("/"))
-    
-    result.result()
-  }
     
   private def isDir(path: String) = new File(path).isDirectory
   

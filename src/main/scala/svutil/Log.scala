@@ -7,6 +7,7 @@ import scala.util.Properties.propOrElse
 import Color._
 import Exec.runCmd
 import svutil.exceptions._
+import Utilities._
 
 object Log extends Command {
   
@@ -63,8 +64,8 @@ object Log extends Command {
       val fullMsg  = (entry \ "msg").head.text.split("\n")
       val msg1st   = fullMsg.headOption getOrElse ""
       //  Get just the date, stripping of the time
-      val date     = """^[^T]+""".r.findFirstIn((entry \ "date").head.text) getOrElse ""
-      val time     = """(?<=T)[^.]+""".r.findFirstIn((entry \ "date").head.text) getOrElse ""
+      val date     = extractISODate((entry \ "date").head.text)
+      val time     = extractISOTime((entry \ "date").head.text)
       val prefix   = buildPrefix(revision, author, date, time)
 
       if (options.full) {
