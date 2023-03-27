@@ -12,7 +12,7 @@ lazy val stage         = taskKey[Unit]("Create distribution zip file")
 lazy val sourceScripts = settingKey[File]("Other source file included in the package")
 
 
-lazy val svutil = (project in file("."))
+lazy val root = (project in file("."))
   .settings(
     commonSettings,
     name        := "sv",
@@ -39,8 +39,8 @@ lazy val svutil = (project in file("."))
         val mapper: FileMap = Path.flat(directory)
         mapper(origfile)
       }
-      val pkgDir     = target.value / s"svutil-${version.value}"
-      val lib        = pkgDir / "lib"
+      val pkgDir     = target.value / s"sv-${version.value}"
+      val lib        = pkgDir / "svlib"
       val loader_jar = (loader / Compile / packageBin / artifactPath).value
       val zipfile    = file(s"${pkgDir.getAbsolutePath}.zip")
       val jars       = (Compile / fullClasspathAsJars).value.files
