@@ -12,7 +12,7 @@ import Utilities._
 
 object Branch extends Command {
   
-  override val name = "br"
+  override val name = "branch"
   override val description = "Display current branch or list branches"
   
   case class Options(

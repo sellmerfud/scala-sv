@@ -50,6 +50,13 @@ object Main {
       println(s"\nFor help about a particular command use $scriptName <command> --help")
   }
   
+  def matchCommand(name: String): List[Command] = {
+    if ("""^[a-zA-Z][-a-zA-Z0-9_]*""".r matches name)
+      commands filter (_.name startsWith name)
+    else
+      Nil
+  }
+  
   val STATUS_OK  = 0
   val STATUS_BAD = 1
     
@@ -68,12 +75,8 @@ object Main {
       STATUS_OK
     }
     else {
-      commands.find(_.name == cmdName) match {
-        case None =>
-          System.err.println(s"$scriptName: '$cmdName' is not a $scriptName command.  See '$scriptName --help'.")
-          STATUS_BAD
-          
-        case Some(command) =>
+      matchCommand(cmdName) match {
+        case command :: Nil =>
           try {
             command.run(cmdArgs.tail)
             STATUS_OK
@@ -100,6 +103,15 @@ object Main {
               System.err.println(Option(e.getMessage) getOrElse e.getClass.getName)
               STATUS_BAD
           }
+
+        case Nil =>
+          System.err.println(s"$scriptName: '$cmdName' is not a $scriptName command.  See '$scriptName --help'.")
+          STATUS_BAD
+          
+        case commands =>
+          System.err.println(s"$scriptName: command '$cmdName' is ambiguous.  (${(commands map (_.name)).mkString(", ")})")
+          STATUS_BAD
+      
       }
     }
     
