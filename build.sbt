@@ -18,7 +18,7 @@ lazy val root = (project in file("."))
     name        := "sv",
     description := "Subversion utilities",
     assembly / mainClass := Some("svutil.Main"),
-    assembly / assemblyJarName := "svutil.jar",
+    assembly / assemblyJarName := "sv.jar",
     scalacOptions       ++= Seq( "-deprecation", "-unchecked", "-feature" ),
     libraryDependencies ++= Seq(
       "org.scala-lang.modules" %% "scala-xml" % "2.1.0",

@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # Modify this if you move the location of the jar file.
-svutil_jar="`dirname $0`/svutil.jar"
+svutil_jar="`dirname $0`/sv.jar"
 
 # The svuti.script.name is used when showing usage for --help options.
 script_name=`basename $0`
