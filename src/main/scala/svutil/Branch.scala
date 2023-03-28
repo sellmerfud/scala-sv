@@ -69,7 +69,7 @@ object Branch extends Command {
       separator("Assumes the repository has standard /trunk, /branches, /tags structure.")
     }
     
-   parser.parse(args, Options())
+    parser.parse(args, Options())
   }
   
   

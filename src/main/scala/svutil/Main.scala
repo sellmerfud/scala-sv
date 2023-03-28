@@ -48,6 +48,7 @@ object Main {
       for (c <- commands)
         println(f"  ${c.name}%-8s  ${c.description}")
       println(s"\nFor help about a particular command use $scriptName <command> --help")
+      println(s"Commands may be abbreviated to their shortest unique prefix")
   }
   
   def matchCommand(name: String): List[Command] = {

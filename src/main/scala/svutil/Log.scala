@@ -13,14 +13,19 @@ object Log extends Command {
   
   override val name = "log"
   override val description = "Display formatted subversion log messages"
-  
+  case class Search(glob: String, searchAnd: Boolean)
   case class Options(
-    author: Boolean = false,
-    date:   Boolean = false,
-    time:   Boolean = false,
-    full:   Boolean = false,
-    paths:  Boolean = false,
-    show:   Boolean = false)
+    limit:     Option[Int]    = None,
+    author:    Boolean        = false,
+    date:      Boolean        = false,
+    time:      Boolean        = false,
+    full:      Boolean        = false,
+    showPaths: Boolean        = false,
+    show:      Boolean        = false,
+    noCopy:    Boolean        = false,
+    revisions: Vector[String] = Vector.empty,
+    search:    Vector[Search] = Vector.empty,
+    paths:     Vector[String] = Vector.empty)
 
 
   def showResults(logData: String, options: Options): Unit = {
@@ -60,7 +65,7 @@ object Log extends Command {
       else
         println(s"${prefix} ${msg1st}")
       
-      if (options.paths) {
+      if (options.showPaths) {
         for (LogPath(path, kind, action, textMods, propMods, fromPath) <- logPaths) {
           val coloredAction = action match {
             case "D" => red("D")
@@ -77,80 +82,93 @@ object Log extends Command {
     }
   }
   
-  
-  def showUsage(): Unit = {
-    val usage = s"""|usage: $scriptName $name [<options>] [<path>]
-                    |  -{number}        : limits the number of log entries to {number}
-                    |  -a, --author     : displays the user who made the commit
-                    |  -d, --date       : displays the date for each commit
-                    |  -t, --time       : displays the date and time for each commit
-                    |  -f, --full       : displays the full commit message
-                    |  -p, --paths      : displays the affected paths
-                    |  -i, --incoming   : displays commits incoming with next update
-                    |  -v, --verbose    : same as --author --time --full
-                    |  -h, --help       : display usage and exit.
-                    |  <path>           : default is the current directory""".stripMargin
-    println(usage)
-    println("\nAll other arguments are passed through to the svn log command")
+  private def processCommandLine(args: Seq[String]): Options = {
+    import org.sellmerfud.optparse._
+    
+    val parser = new OptionParser[Options] {
+      banner = s"usage: $scriptName $name [<options>] [ <path> | <url> [<path...] ]"
+      
+      reqd[Int]("-l", "--limit=<number>", "Limit the number of commits displayed") {
+        (value, options) => options.copy(limit = Some(value))
+      }
+      
+      int("-<number>", "Limit the number of commits displayed (shorthand for -l)") {
+        (value, options) => options.copy(limit = Some(value))
+      }
+      
+      flag("-a", "--author", "Display the author of each commit")
+          { _.copy(author = true) }
+          
+      flag("-d", "--date", "Display the date of each commit")
+          { _.copy(date = true) }
+      
+      flag("-t", "--time", "Display the date and time of each commit")
+          { _.copy(date = true, time = true) }
+      
+      flag("-f", "--full", "Display the full commit messages")
+          { _.copy(full = true) }
+      
+      flag("-p", "--paths", "Display the paths affected by each commit")
+          { _.copy(showPaths = true) }
+      
+      flag("-v", "--verbose", "Shorthand for --author --time --full")
+          { _.copy(author = true, date = true, time = true, full = true) }
+      
+      reqd[String]("-r", "--revision=<revision>", "Specify a revision or a range of revisions",
+                                                  "Can be specified multiple times",
+                                                  "See the svn log help for more information")
+        { (revision, options) => options.copy(revisions = options.revisions :+ revision) }
+        
+      flag("-i", "--incoming", "Display commits incoming with next update", "shorthand for -rHEAD:BASE")
+          { options => options.copy(revisions = options.revisions :+ "HEAD:BASE") }
+
+      flag("", "--stop-on-copy", "Do not cross copies while traversing history")
+        { _.copy(noCopy = true) }
+        
+      reqd[String]("-s", "--search=<glob>", "Limits commits to those with a message containing <glob>")
+        { (glob, options) => options.copy(search = options.search :+ Search(glob, searchAnd = false)) }
+        
+      reqd[String]("", "--search-and=<glob>", "Combine <glob> with the previous search pattern")
+        { (glob, options) => options.copy(search = options.search :+ Search(glob, searchAnd = true)) }
+
+      flag("", "--show", "Show the resulting svn log command instead of running it")
+        { _.copy(show = true) }
+        
+      flag("-h", "--help", "Show this message")
+          { _ => println(help); throw HelpException() }
+    
+      arg[String] { (path, options) => options.copy(paths = options.paths :+ path) }
+      
+      separator("")
+      separator("By default shows only the first line of each commit message (see --full)")
+    }
+    
+    parser.parse(args, Options())
   }
   
   
-  def processCommandLine(args: Seq[String]): (Seq[String], Options) = {
-    var cmdLine = Vector[String]("svn", "log")
-    var options = Options()
-    val ignoredLong = Set("--quiet", "--diff", "--incremental", "--use-merge-history", "--with-no-revprops", "--force-interactive")
-    val ignoredShort = Set('q', 'g')
-
-    def singleDash(arg: String) = arg.startsWith("-") && !arg.startsWith("--")
-    def singleLettersArgs(letters: String): Unit = if (letters.length > 0) {
-      import Character.isDigit
-      def nextChar = singleLettersArgs(letters drop 1)
-        letters(0) match {
-          case 'h'                    => showUsage(); throw HelpException()
-          case 'a'                    => options = options.copy(author = true); nextChar
-          case 'd'                    => options = options.copy(date = true); nextChar
-          case 't'                    => options = options.copy(date = true, time = true); nextChar
-          case 'f'                    => options = options.copy(full = true); nextChar
-          case 'p'                    => options = options.copy(paths = true); nextChar
-          case 'i'                    => cmdLine :+= "-rHEAD:BASE"; nextChar
-          case 'v'                    => options = options.copy(author = true, date = true, time = true, full = true); nextChar
-          case 'r' | 'c' | 'l' | 'x'  => cmdLine :+= s"-$letters" // These are followed by an argument...
-          case ch if ignoredShort(ch) => nextChar
-          case ch if isDigit(ch)      =>
-            cmdLine :+= s"-l${letters takeWhile isDigit}"
-            singleLettersArgs(letters dropWhile isDigit)
-          case ch                     => cmdLine :+= s"-$ch"; nextChar
-        }
-        
-    }
-  
-    args foreach {
-      case "--help"                => showUsage(); throw HelpException()
-      case "--quiet"               => // Ignore these svn args as they do not apply
-      case "--author"              => options = options.copy(author = true)
-      case "--date"                => options = options.copy(date = true)
-      case "--time"                => options = options.copy(date = true, time = true)
-      case "--full"                => options = options.copy(full = true)
-      case "--incoming"            => cmdLine :+= "-rHEAD:BASE"
-      case "--paths"               => options = options.copy(paths = true)
-      case "--verbose"             => options = options.copy(author = true, date = true, time = true, full = true)
-      case "--show"                => options = options.copy(show = true)
-      case arg if ignoredLong(arg) =>
-      case arg if singleDash(arg)  => singleLettersArgs(arg drop 1)
-      case arg                     => cmdLine :+= arg
-    }
+  def buildCmdLine(options: Options): Seq[String] = {
+    var cmdLine = Vector[String]("svn", "log", "--xml")
     
-    if (options.paths)
+    options.limit foreach { limit => cmdLine :+= s"--limit=${limit}" } 
+    if (options.showPaths)
       cmdLine :+= "--verbose"
+    if (options.noCopy)
+      cmdLine :+= "--stop-on-copy"
     
-    cmdLine :++= Vector("--xml", "--with-all-revprops", "--non-interactive")
-    
-    (cmdLine, options)
+    cmdLine :++= (options.revisions map { revision => s"--revision=$revision" })
+    cmdLine :++= (options.search map { 
+      case Search(glob, false) => s"--search=$glob"
+      case Search(glob, true) => s"--search-and=$glob"
+    })
+    cmdLine :++= options.paths
+    cmdLine
   }
   
   
   override def run(args: Seq[String]): Unit = {
-    val (cmdLine, options) = processCommandLine(args)
+    val options = processCommandLine(args)
+    val cmdLine = buildCmdLine(options)
     val status = if (options.show)
       println(cmdLine mkString " ")
     else
