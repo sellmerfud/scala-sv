@@ -42,12 +42,10 @@ object Ignore extends Command {
     
   private def isDir(path: String) = new File(path).isDirectory
   
-  private def validatePath(path: String): Boolean = {
-    val out = runCmd(Seq("svn", "info", "--xml", path))
-    val entry = (XML.loadString(out.mkString("\n")) \ "entry").head
-    
-    // Make sure if refers to a directory in the working copy
-    (entry \ "wc-info").size > 0 && entry.attributes("kind").head.text == "dir"
+  // Make sure it refers to a directory in the working copy
+  private def isWorkingCopyDirectory(path: String): Boolean = {
+    val info = getSvnInfo(path)
+    info.workingCopyPath.nonEmpty && info.kind == "dir"
   }
   
   private def displayIgnoreEntries(options: Options): Unit = {
@@ -71,18 +69,15 @@ object Ignore extends Command {
       }
       
       //  Recursively process all subdirectories
-      val lsOut = runCmd(Seq("svn", "ls", "--xml", dirPath))
-      val dirEntries = (XML.loadString(lsOut.mkString("\n")) \ "list" \ "entry") filter { entry =>
-        entry.attributes("kind").head.text == "dir"
-      }
-      for (subdir <- dirEntries) {
-          val subDirPath = joinPaths(dirPath, (subdir \ "name").head.text.chomp("/"))
+      val subDirs = getSvnLists(dirPath).head.entries filter (_.kind =="dir")
+      for (subdir <- subDirs) {
+          val subDirPath = joinPaths(dirPath, subdir.name.chomp("/"))
           svnIgnore(subDirPath)
       }
     }
     
     
-    if (!validatePath(options.path))
+    if (!isWorkingCopyDirectory(options.path))
       throw GeneralError(s"${options.path} is not a subversion working copy directory")
 
     svnIgnore(options.path)

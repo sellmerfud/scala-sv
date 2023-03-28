@@ -2,7 +2,7 @@
 package svutil
 
 import scala.sys.process.{ Process, ProcessBuilder, ProcessLogger }
-import java.io.IOException
+import java.io.{ File, IOException }
 import scala.collection.mutable.ListBuffer
 
 
@@ -28,10 +28,10 @@ object Exec {
   //  stdout and stdin.
   //  The first commponent of the command is the name of the command,
   //  and the rest are arguments passed on the command line.
-  def exec(command: Seq[String]): (Int, Seq[String], Seq[String]) = {
+  def exec(command: Seq[String], cwd: Option[File] = None): (Int, Seq[String], Seq[String]) = {
     val logger = new ExecLogger
     try {
-      val status = Process(command) ! logger
+      val status = Process(command, cwd) ! logger
       (status, logger.stdout, logger.stderr)
     }
     catch {
@@ -47,8 +47,8 @@ object Exec {
   
   //  Execute the command and return the commands stdout
   //  If the command fails, throw an ExecError
-  def runCmd(command: Seq[String]): Seq[String] = {
-    exec(command) match {
+  def runCmd(command: Seq[String], cwd: Option[File] = None): Seq[String] = {
+    exec(command, cwd) match {
       case (0, stdout, _)   => stdout
       case (err, _, stderr) => throw ExecError(err, stderr)
     }

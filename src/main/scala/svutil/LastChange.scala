@@ -49,28 +49,6 @@ object LastChange extends Command {
     parser.parse(args, Options())
   }
   
-    
-  case class FileInfo(url: String, relUrl: String, atRev: String, commitRev: String, author: String, date: String)
-  
-  private def getFileInfo(path: String, rev: String): FileInfo = {
-    val out     = runCmd(Seq("svn", "info", "--revision", rev, "--xml", path))
-    val entry   = (XML.loadString(out.mkString("\n")) \ "entry").head
-    val commit  = (entry \ "commit").head
-    val isoDate = (commit \ "date").head.text
-    
-    if (entry.attributes("kind").head.text != "file")
-      throw GeneralError(s"$path does not reference a file entry in the repository")
-    
-    FileInfo(
-      url       = (entry \ "url").head.text,
-      relUrl    = (entry \ "relative-url").head.text,
-      atRev     = entry.attributes("revision").head.text,
-      commitRev = commit.attributes("revision").head.text,
-      author    = (commit \ "author").head.text,
-      date      = s"${extractISODate(isoDate)} ${extractISOTime(isoDate)}"
-    )
-  }
-
   private def showChangeDiff(url: String, commitRev: String): Unit = {
     val out = runCmd(Seq("svn", "diff", "--change", commitRev, url))
 
@@ -93,14 +71,17 @@ object LastChange extends Command {
   
   override def run(args: Seq[String]): Unit = {
     val options = processCommandLine(args)
-    val fileInfo = getFileInfo(options.path, options.rev)
+    val fileInfo = getSvnInfo(options.path, Some(options.rev))
+    
+    if (fileInfo.kind != "file")
+      throw GeneralError(s"${options.path} does not reference a file entry in the repository")
     
     println(blue(fileInfo.url))
-    println(s"Last change since: ${yellow(fileInfo.atRev)}")
+    println(s"Last change since: ${yellow(fileInfo.repoRev)}")
     println("-------------------------------------------------------------------")
     println(s"Commit: ${yellow(fileInfo.commitRev)}")
-    println(s"Author: ${cyan(fileInfo.author)}")
-    println(s"Date  : ${purple(fileInfo.date)}")
+    println(s"Author: ${cyan(fileInfo.commitAuthor)}")
+    println(s"Date  : ${purple(displayDateTime(fileInfo.commitDate))}")
     
     if (options.diff)
       showChangeDiff(fileInfo.url, fileInfo.commitRev)

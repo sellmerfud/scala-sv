@@ -8,6 +8,7 @@ import scala.xml._
 import Exec.runCmd
 import Color._
 import svutil.exceptions._
+import Utilities._
 
 object Branch extends Command {
   
@@ -55,53 +56,41 @@ object Branch extends Command {
   private def showList(options: Options): Unit = {
     
     def matchesPrefix(name: String) = options.prefix map (p => name.startsWith(p)) getOrElse true
-    def showEntries(headers: List[String], lists: NodeSeq): Unit = {
-      headers match {
-        case Nil =>
-        
-        case h::hs =>
-          println()
-          println(green(h))
-          println(green("--------------------"))
-          for {
-            entry <- (lists.head \ "entry")
-            name = (entry \ "name").head.text
-            if matchesPrefix(name)
-          } {
-            println(name)
-          }
-            
-          showEntries(hs, lists drop 1)
-      }
+    def showEntries(segments: List[(String, SvnList)]): Unit = segments match {
+      case Nil =>
+      case (header, svnList)::rest =>
+        println()
+        println(green(header))
+        println(green("--------------------"))
+        for (ListEntry(name, kind, size, commitRev, commitAuthor, commitDate) <- svnList.entries if matchesPrefix(name))
+          println(name)
+        showEntries(rest)
     }
     
-    val infoOut = runCmd(Seq("svn", "info", "--xml", options.path))
-    val rootUrl: String = (XML.loadString(infoOut.mkString("\n")) \ "entry" \ "repository" \ "root").head.text
+    val info = getSvnInfo(options.path)
     val (branchesHeader, branchesUrl) = if (options.branches)
-       (Some("Branches"), Seq(s"$rootUrl/branches"))
+       (Some("Branches"), Seq(s"${info.rootUrl}/branches"))
     else
       (None, Seq.empty)
     val (tagsHeader, tagsUrl) = if (options.tags)
-      (Some("Tags"), Seq(s"$rootUrl/tags"))
+      (Some("Tags"), Seq(s"${info.rootUrl}/tags"))
     else
       (None, Seq.empty)
-    val cmdLine = Seq("svn", "ls", "--xml") :++ branchesUrl :++ tagsUrl
     
-    val lsOut = runCmd(cmdLine)
+    val lists = getSvnLists((branchesUrl ++ tagsUrl): _*)
     val headers = branchesHeader.toList ::: tagsHeader.toList
-    val lists   = (XML.loadString(lsOut.mkString("\n")) \ "list")
-    showEntries(headers, lists)
+    
+    showEntries(headers zip lists)
   }
   
   private def showCurrentBranch(options: Options): Unit = {
 
-    val out = runCmd(Seq("svn", "info", "--xml", options.path))
+    val info = getSvnInfo(options.path)
     val TRUNK  = """\^/trunk.*""".r
     val BRANCH = """\^/branches/([^/]+).*""".r
     val TAG    = """\^/tags/([^/]+).*""".r
     // Parse the XML log entries
-    val relativeURL = (XML.loadString(out.mkString("\n")) \ "entry" \ "relative-url").head.text
-    val branch = relativeURL match {
+    val branch = info.relativeUrl match {
       case TRUNK()      => "trunk"
       case BRANCH(name) => name
       case TAG(name)    => s"tag:$name"

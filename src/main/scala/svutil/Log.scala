@@ -4,6 +4,7 @@ package svutil
 
 import scala.util.matching.Regex
 import scala.util.Properties.propOrElse
+import java.time.LocalDateTime
 import Color._
 import Exec.runCmd
 import svutil.exceptions._
@@ -27,28 +28,19 @@ object Log extends Command {
     import scala.xml._
     
     // Parse the XML log entries
-    val entries = XML.loadString(logData) \ "logentry"
+    val entries = (XML.loadString(logData) \ "logentry") map parseLogEntry
     
     //  First get the length of the longest revision string
-    val maxRevLen = entries.foldLeft(0) { (maxLen, entry) =>
-      val len = entry.attributes("revision").head.text.length
-      len max maxLen
-    }
-    
-    val maxAuthorLen = if (options.author) {
-      entries.foldLeft(0) { (maxLen, entry) =>
-        val len = (entry \ "author").head.text.length
-        len max maxLen
-      }      
-    }
+    val maxRevLen = entries.foldLeft(0) { (maxLen, entry) => entry.revision.length max maxLen }
+    val maxAuthorLen = if (options.author)
+      entries.foldLeft(0) { (maxLen, entry) => entry.author.length max maxLen }      
     else
       0
-    
 
-    def buildPrefix(revision: String, author: String, date: String, time: String): String = {
+    def buildPrefix(revision: String, author: String, date: LocalDateTime): String = {
         val revFormat    = s"%-${maxRevLen}s"
         val authorFormat = s"%-${maxAuthorLen}s"
-        val dateStr      = if (options.time) s"$date $time" else date
+        val dateStr      = if (options.time) displayDateTime(date) else displayDate(date)
         
         (options.author, options.date) match {
           case (true, true)  => s"${yellow(revFormat)} ${cyan(authorFormat)} ${purple("%s")}".format(revision, author, dateStr)
@@ -58,15 +50,9 @@ object Log extends Command {
         }
     }
     
-    for (entry <- entries) {
-      val revision = entry.attributes("revision").head.text
-      val author   = (entry \ "author").head.text
-      val fullMsg  = (entry \ "msg").head.text.split("\n")
+    for (LogEntry(revision, author, date, fullMsg, logPaths) <- entries) {
       val msg1st   = fullMsg.headOption getOrElse ""
-      //  Get just the date, stripping of the time
-      val date     = extractISODate((entry \ "date").head.text)
-      val time     = extractISOTime((entry \ "date").head.text)
-      val prefix   = buildPrefix(revision, author, date, time)
+      val prefix   = buildPrefix(revision, author, date)
 
       if (options.full) {
         println(prefix)
@@ -76,19 +62,16 @@ object Log extends Command {
         println(s"${prefix} ${msg1st}")
       
       if (options.paths) {
-        for (pathEntry <- (entry \ "paths" \ "path")) {
-          val action = pathEntry.attributes("action").head.text
+        for (LogPath(path, kind, action, textMods, propMods, fromPath) <- logPaths) {
           val coloredAction = action match {
             case "D" => red("D")
             case "A" => green("A")
             case _   => white(action)
           }
-          val path     = pathEntry.head.text
-          val fromPath = Option(pathEntry.attributes("copyfrom-path")) flatMap (_.headOption) map (_.text) getOrElse ""
-          val fromRev  = Option(pathEntry.attributes("copyfrom-rev")) flatMap (_.headOption) map (_.text) getOrElse ""
-          val from     = if (fromPath != "") s"  (from ${fromPath}:${fromRev})"
-                         else                ""
-
+          val from = fromPath match {
+            case Some(FromPath(path, revision)) => s"  (from ${path}:${revision})"
+            case None                           => ""
+          }
           println(s"  ${coloredAction} ${blue(path)}${red(from)}")
         }
       }
