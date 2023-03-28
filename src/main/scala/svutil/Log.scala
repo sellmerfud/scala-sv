@@ -3,7 +3,6 @@
 package svutil
 
 import scala.util.matching.Regex
-import scala.util.Properties.propOrElse
 import java.time.LocalDateTime
 import Color._
 import Exec.runCmd
@@ -80,8 +79,6 @@ object Log extends Command {
   
   
   def showUsage(): Unit = {
-    val scriptName = propOrElse("svutil.script.name", "sv")
-    
     val usage = s"""|usage: $scriptName $name [<options>] [<path>]
                     |  -{number}        : limits the number of log entries to {number}
                     |  -a, --author     : displays the user who made the commit

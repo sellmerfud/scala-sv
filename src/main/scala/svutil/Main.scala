@@ -2,9 +2,9 @@
 package svutil
 
 import java.io.{ IOException, BufferedReader, InputStreamReader }
-import scala.util.Properties.propOrElse
 import svutil.exceptions._
 import Exec.ExecError
+import Utilities._
 import org.sellmerfud.optparse.OptionParserException
 
 object Main {
@@ -55,7 +55,6 @@ object Main {
     
     
   def main(args: Array[String]): Unit = {
-    val scriptName = propOrElse("svutil.script.name", "sv")
     val mainOpts   = args.toSeq takeWhile (_ startsWith "-")
     val cmdArgs    = args.toSeq dropWhile (_ startsWith "-")
     val cmdName    = cmdArgs.headOption getOrElse "help"

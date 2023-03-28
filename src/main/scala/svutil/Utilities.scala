@@ -3,12 +3,15 @@ package svutil
 
 import java.util.Locale
 import java.time.format.DateTimeFormatter
+import scala.util.Properties.propOrElse
 import java.time._
 import scala.xml._
 import Exec._
 import exceptions._
 
 object Utilities {
+  
+  lazy val scriptName = propOrElse("sv.script.name", "sv")
   
   
   def generalError(msg: String): Nothing = throw new GeneralError(msg)
@@ -53,7 +56,7 @@ object Utilities {
     path: String,  // Not too useful
     repoRev: String,
     kind: String,
-    size: Long,  // Zero for directories
+    size: Option[Long],
     url: String,
     relativeUrl: String,
     rootUrl: String,  // URL to repo.  Up to but not including /trunk..., /branches..., /tags...
@@ -75,7 +78,7 @@ object Utilities {
       path            = entry.attributes("path").head.text,
       repoRev         = entry.attributes("revision").head.text,
       kind            = entry.attributes("kind").head.text,
-      size            = Option(entry.attributes("size")) map (_.text.toLong) getOrElse 0,
+      size            = Option(entry.attributes("size")) map (_.text.toLong),
       url             = (entry \ "url").head.text,
       relativeUrl     = (entry \ "relative-url").head.text,
       rootUrl         = (entry \ "repository" \ "root").head.text,
@@ -92,6 +95,15 @@ object Utilities {
     val out     = runCmd(cmdLine)
     val entry   = (XML.loadString(out.mkString("\n")) \ "entry").head
     parseSvnInfo(entry)
+  }
+  
+  def getSvnInfoList(paths: Seq[String], revision: Option[String] = None): Seq[SvnInfo] = {
+    val revArg  = revision map (r => Seq("--revision", r)) getOrElse Seq.empty
+    val cmdLine = Seq("svn", "info", "--xml") ++ revArg ++ paths
+    val out     = runCmd(cmdLine)
+    val entries = (XML.loadString(out.mkString("\n")) \ "entry")
+    
+    entries.toSeq map parseSvnInfo
   }
 
   
@@ -130,7 +142,7 @@ object Utilities {
   // ==========================================
   // SVN ist Entry
   // ==========================================
-  case class ListEntry(name: String, kind: String, size: Long, commitRev: String, commitAuthor: String, commitDate: LocalDateTime)
+  case class ListEntry(name: String, kind: String, size: Option[Long], commitRev: String, commitAuthor: String, commitDate: LocalDateTime)
   case class SvnList(path: String, entries: List[ListEntry])
   
   def getSvnLists(paths: String*): List[SvnList] = {
@@ -148,7 +160,7 @@ object Utilities {
           ListEntry(
             name         = (entryNode \ "name").head.text,
             kind         = entryNode.attributes("kind").head.text,
-            size         = (entryNode \ "size").headOption map (_.text.toLong) getOrElse 0,
+            size         = (entryNode \ "size").headOption map (_.text.toLong),
             commitRev    = commit.attributes("revision").head.text,
             commitAuthor = (commit \ "author").head.text,
             commitDate   = parseISODate((commit \ "date").head.text))

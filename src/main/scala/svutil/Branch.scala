@@ -4,7 +4,6 @@ package svutil
 
 import scala.util.matching.Regex
 import java.util.regex.PatternSyntaxException
-import scala.util.Properties.propOrElse
 import scala.xml._
 import Exec.runCmd
 import Color._
@@ -31,8 +30,6 @@ object Branch extends Command {
   private def processCommandLine(args: Seq[String]): Options = {
     import org.sellmerfud.optparse._
     
-    val scriptName = propOrElse("svutil.script.name", "sv")
-    
     val parser = new OptionParser[Options] {
       addArgumentParser[Regex] { arg =>
         try   { new Regex(arg) }
@@ -44,7 +41,7 @@ object Branch extends Command {
 
       banner = s"usage: $scriptName $name [<options>] [<path> | <url>]"
       
-      optl[Regex]("-b", "--branches[=<regex>]", "Display list of branches in the repo") {
+      optl[Regex]("-b", "--branches[=<regex>]", "Display list of branches in the repository") {
         (regex, options) => 
             if (regex.isEmpty)
               options.copy(allBranches = true, branches = None)
@@ -52,7 +49,7 @@ object Branch extends Command {
               options.copy(allBranches = false, branches = regex)
       }
           
-      optl[Regex]("-t", "--tags[=<regex>]", "Display list of tags in the repo") {
+      optl[Regex]("-t", "--tags[=<regex>]", "Display list of tags in the repository") {
         (regex, options) => 
           if (regex.isEmpty)
             options.copy(allTags = true, tags = None)
@@ -69,7 +66,7 @@ object Branch extends Command {
       separator("If neither of --branches or --tags is present, the current branch is displayed.")
       separator("If no <regex> is specified for --branches, --tags then all are listed.")
       separator("If <path> is omitted the current directory is used by default.")
-      separator("Assumes the repo has standard /trunk, /branches, /tags structure.")
+      separator("Assumes the repository has standard /trunk, /branches, /tags structure.")
     }
     
    parser.parse(args, Options())
@@ -82,11 +79,11 @@ object Branch extends Command {
       //  If the regex is empty the we are matching all entries
       def acceptable(entry: ListEntry): Boolean = regex map (_.findFirstIn(entry.name).nonEmpty) getOrElse true
       println()
-      println(green(header))
-      println(green("--------------------"))
+      println(header)
+      println("--------------------")
       
       getSvnLists(url).head.entries filter acceptable foreach { entry =>
-        println(yellow(entry.name))
+        println(green(entry.name))
       }
     }
     
@@ -111,7 +108,7 @@ object Branch extends Command {
       case TAG(name)    => s"tag:$name"
       case _            => "cannot be determined"
     }
-    println(s"Current branch: ${yellow(branch)}")
+    println(s"Current branch: ${green(branch)}")
   }
   
   override def run(args: Seq[String]): Unit = {

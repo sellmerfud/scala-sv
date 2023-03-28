@@ -4,7 +4,6 @@ package svutil
 
 import java.io.File
 import scala.util.matching.Regex
-import scala.util.Properties.propOrElse
 import scala.xml._
 import Exec.{ runCmd, ExecError }
 import Color._
@@ -24,8 +23,6 @@ object LastChange extends Command {
   
   private def processCommandLine(args: Seq[String]): Options = {
     import org.sellmerfud.optparse._
-    
-    val scriptName = propOrElse("svutil.script.name", "sv")
     
     val parser = new OptionParser[Options] {
       banner = s"usage: $scriptName $name [<options>] <path>|<url>"
