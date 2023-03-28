@@ -6,8 +6,12 @@ import java.time.format.DateTimeFormatter
 import java.time._
 import scala.xml._
 import Exec._
+import exceptions._
 
 object Utilities {
+  
+  
+  def generalError(msg: String): Nothing = throw new GeneralError(msg)
   
   implicit class StringWrapper(str: String) {
     def chomp(suffix: String = "\n"): String = suffix match {
@@ -42,7 +46,9 @@ object Utilities {
   def displayTime(date: LocalDateTime): String = date.format(DisplayTimeFormat)
   def displayDateTime(date: LocalDateTime): String = s"${displayDate(date)} ${displayTime(date)}"
 
-  
+  // ==========================================
+  // SVN Info
+  // ==========================================
   case class SvnInfo(
     path: String,  // Not too useful
     repoRev: String,
@@ -51,6 +57,7 @@ object Utilities {
     url: String,
     relativeUrl: String,
     rootUrl: String,  // URL to repo.  Up to but not including /trunk..., /branches..., /tags...
+    repoUUID: String,
     commitRev: String,
     commitAuthor: String,
     commitDate: LocalDateTime,
@@ -72,6 +79,7 @@ object Utilities {
       url             = (entry \ "url").head.text,
       relativeUrl     = (entry \ "relative-url").head.text,
       rootUrl         = (entry \ "repository" \ "root").head.text,
+      repoUUID        = (entry \ "repository" \ "uuid").head.text,
       commitRev       = commit.attributes("revision").head.text,
       commitAuthor    = (commit \ "author").head.text,
       commitDate      = parseISODate((commit \ "date").head.text),
@@ -87,6 +95,9 @@ object Utilities {
   }
 
   
+  // ==========================================
+  // SVN Log Entry
+  // ==========================================
   case class FromPath(path: String, revision: String)
   case class LogPath(path: String, kind: String, action: String, textMods: Boolean, propMods: Boolean, fromPath: Option[FromPath])
   case class LogEntry(revision: String, author: String, date: LocalDateTime, msg: Seq[String], paths: Seq[LogPath])
@@ -116,6 +127,9 @@ object Utilities {
       paths    = pathEntries)
   }
   
+  // ==========================================
+  // SVN ist Entry
+  // ==========================================
   case class ListEntry(name: String, kind: String, size: Long, commitRev: String, commitAuthor: String, commitDate: LocalDateTime)
   case class SvnList(path: String, entries: List[ListEntry])
   
@@ -123,7 +137,7 @@ object Utilities {
     if (paths.isEmpty)
       List.empty
     else {
-      val cmdLine   = Seq("svn", "ls", "--xml") ++ paths
+      val cmdLine   = Seq("svn", "list", "--xml") ++ paths
       val lsOut     = runCmd(cmdLine)
       val listNodes = (XML.loadString(lsOut.mkString("\n")) \ "list")
       

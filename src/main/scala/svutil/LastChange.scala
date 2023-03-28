@@ -74,7 +74,7 @@ object LastChange extends Command {
     val fileInfo = getSvnInfo(options.path, Some(options.rev))
     
     if (fileInfo.kind != "file")
-      throw GeneralError(s"${options.path} does not reference a file entry in the repository")
+      generalError(s"${options.path} does not reference a file entry in the repository")
     
     println(blue(fileInfo.url))
     println(s"Last change since: ${yellow(fileInfo.repoRev)}")

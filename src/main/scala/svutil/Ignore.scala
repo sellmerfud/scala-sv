@@ -78,7 +78,7 @@ object Ignore extends Command {
     
     
     if (!isWorkingCopyDirectory(options.path))
-      throw GeneralError(s"${options.path} is not a subversion working copy directory")
+      generalError(s"${options.path} is not a subversion working copy directory")
 
     svnIgnore(options.path)
   }

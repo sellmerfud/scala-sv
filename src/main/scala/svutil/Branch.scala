@@ -3,6 +3,7 @@
 package svutil
 
 import scala.util.matching.Regex
+import java.util.regex.PatternSyntaxException
 import scala.util.Properties.propOrElse
 import scala.xml._
 import Exec.runCmd
@@ -16,10 +17,16 @@ object Branch extends Command {
   override val description = "Display current branch or list branches"
   
   case class Options(
-    branches: Boolean        = false,
-    tags:     Boolean        = false,
-    prefix:   Option[String] = None,
-    path:     String         = ".")
+    allBranches: Boolean       = false,
+    branches:    Option[Regex] = None,
+    allTags:     Boolean       = false,
+    tags:        Option[Regex] = None,
+    path:        String        = ".") {
+  
+    def listBranches = allBranches || branches.nonEmpty
+    def listTags     = allTags     || tags.nonEmpty
+  }
+    
   
   private def processCommandLine(args: Seq[String]): Options = {
     import org.sellmerfud.optparse._
@@ -27,17 +34,32 @@ object Branch extends Command {
     val scriptName = propOrElse("svutil.script.name", "sv")
     
     val parser = new OptionParser[Options] {
+      addArgumentParser[Regex] { arg =>
+        try   { new Regex(arg) }
+        catch { 
+          case e: PatternSyntaxException =>
+            throw new InvalidArgumentException(s"\n${e.getMessage}")
+        }
+      }
+
       banner = s"usage: $scriptName $name [<options>] [<path> | <url>]"
       
-      flag("-b", "--branches", "Dispaly list of branches in the repo")
-          { _.copy(branches = true) }
+      optl[Regex]("-b", "--branches[=<regex>]", "Display list of branches in the repo") {
+        (regex, options) => 
+            if (regex.isEmpty)
+              options.copy(allBranches = true, branches = None)
+            else
+              options.copy(allBranches = false, branches = regex)
+      }
           
-      flag("-t", "--tags", "Dispaly list of tags in the repo")
-          { _.copy(tags = true) }
+      optl[Regex]("-t", "--tags[=<regex>]", "Display list of tags in the repo") {
+        (regex, options) => 
+          if (regex.isEmpty)
+            options.copy(allTags = true, tags = None)
+          else
+            options.copy(allTags = false, tags = regex)
+      }
           
-      reqd[String]("-p", "--prefix=<string>", "Only list entries that begin with <string>")
-        { (string, options) => options.copy(prefix = Some(string)) }
-
       flag("-h", "--help", "Show this message")
           { _ => println(help); throw HelpException() }
     
@@ -45,6 +67,7 @@ object Branch extends Command {
         
       separator("")
       separator("If neither of --branches or --tags is present, the current branch is displayed.")
+      separator("If no <regex> is specified for --branches, --tags then all are listed.")
       separator("If <path> is omitted the current directory is used by default.")
       separator("Assumes the repo has standard /trunk, /branches, /tags structure.")
     }
@@ -55,32 +78,24 @@ object Branch extends Command {
   
   private def showList(options: Options): Unit = {
     
-    def matchesPrefix(name: String) = options.prefix map (p => name.startsWith(p)) getOrElse true
-    def showEntries(segments: List[(String, SvnList)]): Unit = segments match {
-      case Nil =>
-      case (header, svnList)::rest =>
-        println()
-        println(green(header))
-        println(green("--------------------"))
-        for (ListEntry(name, kind, size, commitRev, commitAuthor, commitDate) <- svnList.entries if matchesPrefix(name))
-          println(name)
-        showEntries(rest)
+    def listEntries(header: String, url: String, regex: Option[Regex]): Unit = {
+      //  If the regex is empty the we are matching all entries
+      def acceptable(entry: ListEntry): Boolean = regex map (_.findFirstIn(entry.name).nonEmpty) getOrElse true
+      println()
+      println(green(header))
+      println(green("--------------------"))
+      
+      getSvnLists(url).head.entries filter acceptable foreach { entry =>
+        println(yellow(entry.name))
+      }
     }
     
-    val info = getSvnInfo(options.path)
-    val (branchesHeader, branchesUrl) = if (options.branches)
-       (Some("Branches"), Seq(s"${info.rootUrl}/branches"))
-    else
-      (None, Seq.empty)
-    val (tagsHeader, tagsUrl) = if (options.tags)
-      (Some("Tags"), Seq(s"${info.rootUrl}/tags"))
-    else
-      (None, Seq.empty)
     
-    val lists = getSvnLists((branchesUrl ++ tagsUrl): _*)
-    val headers = branchesHeader.toList ::: tagsHeader.toList
-    
-    showEntries(headers zip lists)
+    val rootUrl = getSvnInfo(options.path).rootUrl
+    if (options.listBranches)
+      listEntries("Branches", s"$rootUrl/branches", options.branches)
+    if (options.listTags)
+      listEntries("Tags", s"$rootUrl/tags", options.tags)
   }
   
   private def showCurrentBranch(options: Options): Unit = {
@@ -102,7 +117,7 @@ object Branch extends Command {
   override def run(args: Seq[String]): Unit = {
     val options = processCommandLine(args)
     
-    if (options.branches || options.tags)
+    if (options.listBranches || options.listTags)
       showList(options)
     else
       showCurrentBranch(options)
