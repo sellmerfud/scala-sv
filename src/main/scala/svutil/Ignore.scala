@@ -52,9 +52,25 @@ object Ignore extends Command {
       catch {
         case ExecError(_, _) =>  Seq.empty  // No svn:ignore defined for this url
       }
+      val globalIgnores = try runCmd(Seq("svn", "pget", "svn:global-ignores", dirPath)) map (_.trim) filter (_ != "")
+      catch {
+        case ExecError(_, _) =>  Seq.empty  // No svn:ignore defined for this url
+      }
       
       for (ignore <- ignores) {
         val ignorePath = joinPaths(dirPath, ignore.chomp("/"))
+        val rebasedPath = ignorePath drop prefixLen
+        // We prefix each path with a slash so that it refers to the
+        // specific entry as per .gitignore rules.
+        // See: https://git-scm.com/docs/gitignore
+        if (isDir(ignorePath))
+          println(s"/$rebasedPath/")
+        else
+          println(s"/$rebasedPath")
+      }
+      
+      for (ignore <- globalIgnores) {
+        val ignorePath = joinPaths(dirPath, "**", ignore.chomp("/"))
         val rebasedPath = ignorePath drop prefixLen
         // We prefix each path with a slash so that it refers to the
         // specific entry as per .gitignore rules.
