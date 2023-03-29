@@ -11,7 +11,7 @@ import exceptions._
 
 object Utilities {
   
-  lazy val scriptName = propOrElse("sv.script.name", "sv")
+  lazy val scriptName = propOrElse("sv.scriptname", "sv")
   
   
   def generalError(msg: String): Nothing = throw new GeneralError(msg)

@@ -9,7 +9,7 @@ object Color {
   //  to a console, we are running on Windows or if the user has explicitly forbidden it.
   lazy val useColor = {
     val colorDefault = if (isWin) "no" else "yes"
-    val ch = (envOrNone("SVNL1_COLOR") orElse propOrNone("svutil.color") getOrElse colorDefault).toLowerCase.head
+    val ch = (envOrNone("SV_COLOR") orElse propOrNone("sv.color") getOrElse colorDefault).toLowerCase.head
     System.console != null && "yt1".toSet(ch)
   }
       
