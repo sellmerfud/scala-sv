@@ -23,6 +23,7 @@ object Log extends Command {
     showPaths: Boolean        = false,
     show:      Boolean        = false,
     noCopy:    Boolean        = false,
+    incoming:  Boolean        = false,
     revisions: Vector[String] = Vector.empty,
     search:    Vector[Search] = Vector.empty,
     paths:     Vector[String] = Vector.empty)
@@ -33,6 +34,30 @@ object Log extends Command {
     
     // Parse the XML log entries
     val entries = (XML.loadString(logData) \ "logentry") map parseLogEntry
+
+    // When showing incoming changes there is a possiblity that the BASE
+    // revision already exists in the working directory.
+    // If --incoming was used with no other --revision arguments,
+    // we check for this an do not display the local commit.
+    // We assume the path given is a working copy path because using -rBASE
+    // for a URL would have caused an error when we ran the log command.
+    val omitRev = if (entries.nonEmpty && options.incoming && options.revisions.size == 1) {
+      def parentDir(path: String) = {
+        val withDir = """^(.*)/[^/]+""".r
+        path.chomp("/") match {
+          case withDir(dir) => dir
+          case _            => "."
+        }
+      }
+      val wcPath = options.paths.headOption getOrElse "."
+      val wcPathInfo = getSvnInfo(wcPath)
+      if (wcPathInfo.kind == "dir")
+        Some(wcPathInfo.commitRev)
+      else
+        Some(getSvnInfo(parentDir(wcPath)).commitRev)
+    }
+    else
+      None
     
     //  First get the length of the longest revision string
     val maxRevLen = entries.foldLeft(0) { (maxLen, entry) => entry.revision.length max maxLen }
@@ -54,7 +79,7 @@ object Log extends Command {
         }
     }
     
-    for (LogEntry(revision, author, date, fullMsg, logPaths) <- entries) {
+    for (LogEntry(revision, author, date, fullMsg, logPaths) <- entries if Some(revision) != omitRev) {
       val msg1st   = fullMsg.headOption getOrElse ""
       val prefix   = buildPrefix(revision, author, date)
 
@@ -120,7 +145,7 @@ object Log extends Command {
         { (revision, options) => options.copy(revisions = options.revisions :+ revision) }
         
       flag("-i", "--incoming", "Display commits incoming with next update", "shorthand for -rHEAD:BASE")
-          { options => options.copy(revisions = options.revisions :+ "HEAD:BASE") }
+          { options => options.copy(incoming = true, revisions = options.revisions :+ "HEAD:BASE") }
 
       flag("", "--stop-on-copy", "Do not cross copies while traversing history")
         { _.copy(noCopy = true) }
