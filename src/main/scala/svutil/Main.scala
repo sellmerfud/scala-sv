@@ -34,7 +34,7 @@ object Main {
     }
   }
   
-  lazy val commands = Log :: Branch :: LastChange :: FileRevs :: Ignore :: Nil
+  lazy val commands = Log::Branch::Show::FileRevs::Bisect::Ignore :: Nil
   
   def showHelp(scriptName: String): Unit = {
     val usage = s"""|usage: $scriptName [-v | --version]

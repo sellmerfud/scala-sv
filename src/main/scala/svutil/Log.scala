@@ -29,6 +29,70 @@ object Log extends Command {
     paths:     Vector[String] = Vector.empty)
 
 
+  private def processCommandLine(args: Seq[String]): Options = {
+    import org.sellmerfud.optparse._
+  
+    val parser = new OptionParser[Options] {
+      banner = s"usage: $scriptName $name [<options>] [ <path> | <url> [<path...] ]"
+    
+      reqd[Int]("-l", "--limit=<number>", "Limit the number of commits displayed") {
+        (value, options) => options.copy(limit = Some(value))
+      }
+    
+      int("-<number>", "Limit the number of commits displayed (shorthand for -l)") {
+        (value, options) => options.copy(limit = Some(value))
+      }
+    
+      flag("-a", "--author", "Display the author of each commit")
+          { _.copy(author = true) }
+        
+      flag("-d", "--date", "Display the date of each commit")
+          { _.copy(date = true) }
+    
+      flag("-t", "--time", "Display the date and time of each commit")
+          { _.copy(date = true, time = true) }
+    
+      flag("-f", "--full", "Display the full commit messages")
+          { _.copy(full = true) }
+    
+      flag("-p", "--paths", "Display the paths affected by each commit")
+          { _.copy(showPaths = true) }
+    
+      flag("-v", "--verbose", "Shorthand for --author --time --full")
+          { _.copy(author = true, date = true, time = true, full = true) }
+    
+      reqd[String]("-r", "--revision=<revision>", "Specify a revision or a range of revisions",
+                                                  "Can be specified multiple times",
+                                                  "See the svn log help for more information")
+        { (revision, options) => options.copy(revisions = options.revisions :+ revision) }
+      
+      flag("-i", "--incoming", "Display commits incoming with next update", "shorthand for -rHEAD:BASE")
+          { options => options.copy(incoming = true, revisions = options.revisions :+ "HEAD:BASE") }
+
+      flag("", "--stop-on-copy", "Do not cross copies while traversing history")
+        { _.copy(noCopy = true) }
+      
+      reqd[String]("-s", "--search=<glob>", "Limits commits to those with a message containing <glob>")
+        { (glob, options) => options.copy(search = options.search :+ Search(glob, searchAnd = false)) }
+      
+      reqd[String]("", "--search-and=<glob>", "Combine <glob> with the previous search pattern")
+        { (glob, options) => options.copy(search = options.search :+ Search(glob, searchAnd = true)) }
+
+      flag("", "--show", "Show the resulting svn log command instead of running it")
+        { _.copy(show = true) }
+      
+      flag("-h", "--help", "Show this message")
+          { _ => println(help); throw HelpException() }
+  
+      arg[String] { (path, options) => options.copy(paths = options.paths :+ path) }
+    
+      separator("")
+      separator("By default shows only the first line of each commit message (see --full)")
+    }
+  
+    parser.parse(args, Options())
+  }
+  
   def showResults(logData: String, options: Options): Unit = {
     import scala.xml._
     
@@ -90,88 +154,11 @@ object Log extends Command {
       else
         println(s"${prefix} ${msg1st}")
       
-      if (options.showPaths) {
-        for (LogPath(path, kind, action, textMods, propMods, fromPath) <- logPaths) {
-          val coloredAction = action match {
-            case "D" => red("D")
-            case "A" => green("A")
-            case _   => white(action)
-          }
-          val from = fromPath match {
-            case Some(FromPath(path, revision)) => s"  (from ${path}:${revision})"
-            case None                           => ""
-          }
-          println(s"  ${coloredAction} ${blue(path)}${red(from)}")
-        }
-      }
+      if (options.showPaths)
+        logPaths foreach (p => println(p.formatted))
     }
   }
-  
-  private def processCommandLine(args: Seq[String]): Options = {
-    import org.sellmerfud.optparse._
     
-    val parser = new OptionParser[Options] {
-      banner = s"usage: $scriptName $name [<options>] [ <path> | <url> [<path...] ]"
-      
-      reqd[Int]("-l", "--limit=<number>", "Limit the number of commits displayed") {
-        (value, options) => options.copy(limit = Some(value))
-      }
-      
-      int("-<number>", "Limit the number of commits displayed (shorthand for -l)") {
-        (value, options) => options.copy(limit = Some(value))
-      }
-      
-      flag("-a", "--author", "Display the author of each commit")
-          { _.copy(author = true) }
-          
-      flag("-d", "--date", "Display the date of each commit")
-          { _.copy(date = true) }
-      
-      flag("-t", "--time", "Display the date and time of each commit")
-          { _.copy(date = true, time = true) }
-      
-      flag("-f", "--full", "Display the full commit messages")
-          { _.copy(full = true) }
-      
-      flag("-p", "--paths", "Display the paths affected by each commit")
-          { _.copy(showPaths = true) }
-      
-      flag("-v", "--verbose", "Shorthand for --author --time --full")
-          { _.copy(author = true, date = true, time = true, full = true) }
-      
-      reqd[String]("-r", "--revision=<revision>", "Specify a revision or a range of revisions",
-                                                  "Can be specified multiple times",
-                                                  "See the svn log help for more information")
-        { (revision, options) => options.copy(revisions = options.revisions :+ revision) }
-        
-      flag("-i", "--incoming", "Display commits incoming with next update", "shorthand for -rHEAD:BASE")
-          { options => options.copy(incoming = true, revisions = options.revisions :+ "HEAD:BASE") }
-
-      flag("", "--stop-on-copy", "Do not cross copies while traversing history")
-        { _.copy(noCopy = true) }
-        
-      reqd[String]("-s", "--search=<glob>", "Limits commits to those with a message containing <glob>")
-        { (glob, options) => options.copy(search = options.search :+ Search(glob, searchAnd = false)) }
-        
-      reqd[String]("", "--search-and=<glob>", "Combine <glob> with the previous search pattern")
-        { (glob, options) => options.copy(search = options.search :+ Search(glob, searchAnd = true)) }
-
-      flag("", "--show", "Show the resulting svn log command instead of running it")
-        { _.copy(show = true) }
-        
-      flag("-h", "--help", "Show this message")
-          { _ => println(help); throw HelpException() }
-    
-      arg[String] { (path, options) => options.copy(paths = options.paths :+ path) }
-      
-      separator("")
-      separator("By default shows only the first line of each commit message (see --full)")
-    }
-    
-    parser.parse(args, Options())
-  }
-  
-  
   def buildCmdLine(options: Options): Seq[String] = {
     var cmdLine = Vector[String]("svn", "log", "--xml")
     

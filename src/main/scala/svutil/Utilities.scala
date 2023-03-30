@@ -7,6 +7,7 @@ import scala.util.Properties.propOrElse
 import java.time._
 import scala.xml._
 import Exec._
+import Color._
 import exceptions._
 
 object Utilities {
@@ -64,7 +65,8 @@ object Utilities {
     commitRev: String,
     commitAuthor: String,
     commitDate: LocalDateTime,
-    workingCopyPath: Option[String])  // Will only exist if the orignal path referred to a working copy (not URL)
+    workingCopyPath: Option[String],              // Only if the referred to a working copy (not URL)
+    workingCopyLastUpdate: Option[LocalDateTime]) // Only if the referred to a working copy (not URL)
       
   def inspect[T](s: String, x: T): T = {
     println(s"INSPECT $s=$x")
@@ -73,20 +75,21 @@ object Utilities {
   
   def parseSvnInfo(entry: Node): SvnInfo = {
     val commit  = (entry \ "commit").head
-    
+
     SvnInfo(
-      path            = entry.attributes("path").head.text,
-      repoRev         = entry.attributes("revision").head.text,
-      kind            = entry.attributes("kind").head.text,
-      size            = Option(entry.attributes("size")) map (_.text.toLong),
-      url             = (entry \ "url").head.text,
-      relativeUrl     = (entry \ "relative-url").head.text,
-      rootUrl         = (entry \ "repository" \ "root").head.text,
-      repoUUID        = (entry \ "repository" \ "uuid").head.text,
-      commitRev       = commit.attributes("revision").head.text,
-      commitAuthor    = (commit \ "author").head.text,
-      commitDate      = parseISODate((commit \ "date").head.text),
-      workingCopyPath = (entry \ "wc-info" \ "wcroot-abspath").headOption map (_.text))
+      path                  = entry.attributes("path").head.text,
+      repoRev               = entry.attributes("revision").head.text,
+      kind                  = entry.attributes("kind").head.text,
+      size                  = Option(entry.attributes("size")) map (_.text.toLong),
+      url                   = (entry \ "url").head.text,
+      relativeUrl           = (entry \ "relative-url").head.text,
+      rootUrl               = (entry \ "repository" \ "root").head.text,
+      repoUUID              = (entry \ "repository" \ "uuid").head.text,
+      commitRev             = commit.attributes("revision").head.text,
+      commitAuthor          = (commit \ "author").head.text,
+      commitDate            = parseISODate((commit \ "date").head.text),
+      workingCopyPath       = (entry \ "wc-info" \ "wcroot-abspath").headOption map (_.text),
+      workingCopyLastUpdate = (entry \ "wc-info" \ "text-updated").headOption map (x => parseISODate(x.text)))
   }
   
   def getSvnInfo(path: String, revision: Option[String] = None): SvnInfo = {
@@ -111,7 +114,20 @@ object Utilities {
   // SVN Log Entry
   // ==========================================
   case class FromPath(path: String, revision: String)
-  case class LogPath(path: String, kind: String, action: String, textMods: Boolean, propMods: Boolean, fromPath: Option[FromPath])
+  case class LogPath(path: String, kind: String, action: String, textMods: Boolean, propMods: Boolean, fromPath: Option[FromPath]) {
+    def formatted:String = {
+      val coloredAction = action match {
+        case "D" => red("D")
+        case "A" => green("A")
+        case _   => white(action)
+      }
+      val from = fromPath match {
+        case Some(FromPath(path, revision)) => s"  (from ${path}:${revision})"
+        case None                           => ""
+      }
+      s"  ${coloredAction} ${blue(path)}${red(from)}"
+    }
+  }
   case class LogEntry(revision: String, author: String, date: LocalDateTime, msg: Seq[String], paths: Seq[LogPath])
     
   def parseLogEntry(entry: Node): LogEntry = {
@@ -135,7 +151,7 @@ object Utilities {
       revision = entry.attributes("revision").head.text,
       author   = (entry \ "author").head.text,
       date     = parseISODate((entry \ "date").head.text),
-      msg      = (entry \ "msg").head.text.split("\n").toSeq,
+      msg      = (entry \ "msg").headOption map { _.text.split("\n").toSeq } getOrElse Seq.empty ,
       paths    = pathEntries)
   }
   
@@ -170,6 +186,41 @@ object Utilities {
       }
     }
   }
+  
+  
+  def showCommit(logEntry: LogEntry, showMsg: Boolean = true, showPaths: Boolean = true): Unit = {
+    println("-------------------------------------------------------------------")
+    println(s"Commit: ${yellow(logEntry.revision)}")
+    println(s"Author: ${cyan(logEntry.author)}")
+    println(s"Date  : ${purple(displayDateTime(logEntry.date))}")
+    println("-------------------------------------------------------------------")
+
+    if (showMsg)
+      logEntry.msg foreach (m => println(s"  $m"))
+  
+    if (showPaths)
+      logEntry.paths foreach (p => println(p.formatted))
+  }
+  
+  def showChangeDiff(url: String, commitRev: String): Unit = {
+    val out = runCmd(Seq("svn", "diff", "--change", commitRev, url))
+
+    def lineColor(line: String): (String) => String = {
+      if      ((line startsWith "---") || (line startsWith "+++")) blue _
+      else if (line startsWith "Index:")                           yellow _
+      else if (line startsWith "==========")                       yellow _
+      else if (line startsWith "Property changes on:")             purple _
+      else if (line startsWith "+")                                green _
+      else if (line startsWith "@@")                               gray _
+      else if (line startsWith "-")                                red _
+      else                                                         white _ 
+    }
+
+    println()
+    for (line <- out)
+      println(lineColor(line)(line))
+  }
+  
 }
 
 

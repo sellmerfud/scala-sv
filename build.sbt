@@ -22,6 +22,7 @@ lazy val root = (project in file("."))
     scalacOptions       ++= Seq( "-deprecation", "-unchecked", "-feature" ),
     libraryDependencies ++= Seq(
       "org.scala-lang.modules" %% "scala-xml" % "2.1.0",
+      "com.typesafe"           %  "config"    % "1.4.2",
       "org.sellmerfud"         %% "optparse"  % "2.3-SNAPSHOT"
     ),
     sourceScripts := sourceDirectory.value / "scripts",
