@@ -5,6 +5,7 @@ import java.util.Locale
 import java.time.format.DateTimeFormatter
 import scala.util.Properties.propOrElse
 import java.time._
+import java.io.File
 import scala.xml._
 import Exec._
 import Color._
@@ -12,7 +13,8 @@ import exceptions._
 
 object Utilities {
   
-  lazy val scriptName = propOrElse("sv.scriptname", "sv")
+  lazy val scriptPath = propOrElse("sv.scriptname", "sv")
+  lazy val scriptName = new File(scriptPath).getName
   
   
   def generalError(msg: String): Nothing = throw new GeneralError(msg)

@@ -4,6 +4,4 @@
 sv_jar="`dirname $0`/sv.jar"
 
 # The svuti.script.name is used when showing usage for --help options.
-script_name=`basename $0`
-
-java -D"sv.scriptname=$script_name" -jar "$sv_jar" "$@"
+java -D"sv.scriptname=$0" -jar "$sv_jar" "$@"

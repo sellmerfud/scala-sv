@@ -2,7 +2,9 @@
 
 package svutil
 
-import java.io.{ File, FileWriter }
+import java.io.{ File, FileWriter, PrintWriter,  FileReader, BufferedReader }
+import java.nio.file.Files
+import java.time._
 import scala.xml._
 import scala.jdk.CollectionConverters._
 import scala.xml._
@@ -39,7 +41,7 @@ object Bisect extends Command {
   implicit class ConfigWrapper(cfg: Config) {
     def optString(path: String): Option[String] = if (cfg.getIsNull(path)) None else Some(cfg.getString(path))
   }
-  
+    
   //  Convert our BisectData to a Config value that can be saved to disk.
   private def toConfigObject(data: BisectData): ConfigObject = {
     ConfigValueFactory.fromMap(Map(
@@ -110,22 +112,50 @@ object Bisect extends Command {
   //  if the data file is missing.
   private def getBisectData(): BisectData = {
     loadBisectData() getOrElse {
-      generalError(s"You must first start the bisect process with '$scriptName $name ${Start.cmdName}")
+      generalError(s"You must first start a bisect session with '$scriptName $name ${Start.cmdName}")
     }
   }
   
   private def appendToBisectLog(msg: String): Unit = {
-    // To be done.
+    try {
+      val writer = new PrintWriter(new FileWriter(bisectLogFile, true), true)
+      writer.println(msg)
+      writer.close()
+    }
+    catch {
+      case e: Throwable =>
+        generalError(s"Error appending to bisect log ($bisectLogFile): ${e.getMessage}")
+    }
   }
   
+  private def displayBisectLog(): Unit = {
+    def read1Line(reader: BufferedReader): Unit =
+        reader.readLine match {
+          case null => // Reached eof
+          case line =>
+            System.out.println(line)
+            read1Line(reader)
+        }
+        
+    try {
+      val reader = new BufferedReader(new FileReader(bisectLogFile))
+      read1Line(reader)
+      reader.close()
+    }
+    catch {
+      case e: Throwable =>
+        generalError(s"Error reading bisect log ($bisectLogFile): ${e.getMessage}")
+    }
+  }
   
   private def logBisectRevision(revision: String, term: String): Unit = {
     val msg1st = get1stLogMessage(revision) getOrElse ""
     appendToBisectLog(s"# $term: [$revision] $msg1st")
   }
   
+  // The cmdLine should start with the biscect sub command
   private def logBisectCommand(cmdLine: Seq[String]): Unit = {
-    appendToBisectLog(cmdLine.mkString(" "))
+    appendToBisectLog((scriptPath +: name +: cmdLine).mkString(" "))
   }
   
   
@@ -351,7 +381,12 @@ object Bisect extends Command {
             termBad     = options.termBad,
             termGood    = options.termGood)
           saveBisectData(data)
+          bisectLogFile.delete()  // Remove any previous log file.
 
+          appendToBisectLog("#!/usr/bin/env sh")
+          appendToBisectLog(s"# $scriptName $name log file")
+          appendToBisectLog(s"# created: ${displayDateTime(LocalDateTime.now)}")
+          appendToBisectLog(s"# ----------------------------")
           data.maxRev foreach (logBisectRevision(_, data.termBadName))
           data.minRev foreach (logBisectRevision(_, data.termGoodName))
           getWaitingStatus(data) foreach { status =>
@@ -362,7 +397,7 @@ object Bisect extends Command {
           if (data.isReady)
             performBisect(data)
           
-          logBisectCommand(Seq(scriptName, name, cmdName) ++ args)
+          logBisectCommand(cmdName +: args)
       }
     }
   }
@@ -422,10 +457,12 @@ object Bisect extends Command {
         val newData = data.copy(maxRev = Some(revision), skipped = data.skipped - revision)
         saveBisectData(newData)
         
+        logBisectRevision(revision, data.termBadName)
+        
         if (newData.isReady)
           performBisect(newData)
     
-        logBisectCommand(Seq(scriptName, name, cmdName) ++ args)
+        logBisectCommand(data.termBadName +: args)
         newData
       }
       
@@ -491,10 +528,12 @@ object Bisect extends Command {
         val newData = data.copy(minRev = Some(revision), skipped = data.skipped - revision)
         saveBisectData(newData)
         
+        logBisectRevision(revision, data.termGoodName)
+        
         if (newData.isReady)
           performBisect(newData)
     
-        logBisectCommand(Seq(scriptName, name, cmdName) ++ args)
+        logBisectCommand(data.termGoodName +: args)
         newData
       }
       
@@ -590,6 +629,7 @@ object Bisect extends Command {
         
       //  Remove the data file, this will clear the bisect session
       bisectDataFile.delete()
+      bisectLogFile.delete()
     }
   }
   
@@ -598,7 +638,8 @@ object Bisect extends Command {
     override val cmdName = "log"
 
     override def run(args: Seq[String]): Unit = {
-      println("not yet implmented")
+      getBisectData() // Make sure a bisect session has been started
+      displayBisectLog()
     }
   }
     
