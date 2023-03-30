@@ -158,6 +158,14 @@ object Bisect extends Command {
     appendToBisectLog((scriptPath +: name +: cmdLine).mkString(" "))
   }
   
+
+  private def getRevisionRange(rev1: String, rev2: String): Seq[String] = {
+    val logXML = XML.loadString(runCmd(Seq("svn", "log", "--xml", "--quiet", s"--revision=$rev1:$rev2", ".")).mkString("\n"))
+    val revs = (logXML \ "logentry") map (node => parseLogEntry(node).revision)
+    // Sort them because the range can start with either the high or low end
+    // and we alwasys work with ranges sorted form high to low (most recent revs first)
+    revs.sortWith(_.toInt > _.toInt)
+  }
   
   //  Return the list of all revisions for the current working copy directory
   private def getAllRevisions(): Seq[String] = {
@@ -273,6 +281,8 @@ object Bisect extends Command {
 
   private def isInteger(str: String) = str forall (_.isDigit)
   
+  // Argument Types with associated argument parsers
+  // ========================================================
   private case class RevisionArg(rev: String)
   
   private val revisionArgParser = (arg: String) => {
@@ -283,6 +293,31 @@ object Bisect extends Command {
     resolveWorkingCopyRevision(arg) match {
       case Some(rev) => RevisionArg(rev)
       case None      => throw new InvalidArgumentException(s" this revision is not part of the working copy history")
+    }
+  }
+
+  private case class RevisionRangeArg(revisions: Seq[String])
+  
+  private val revisionRangeArgParser = (arg: String) => {
+    val revPart = """\d+|HEAD|BASE|PREV|COMMITTED"""
+    val validRange = s"""^($revPart)(?::($revPart))?$$""".r
+    
+    arg match {
+      case validRange(rev1, null) =>
+        resolveWorkingCopyRevision(rev1) map (r => RevisionRangeArg(Seq(r))) getOrElse {
+          throw new InvalidArgumentException(s" is not a valid <revision>")
+        }
+
+      case validRange(rev1, rev2) =>
+        (resolveWorkingCopyRevision(rev1), resolveWorkingCopyRevision(rev2)) match {
+          case (Some(r1), Some(r2)) =>
+            RevisionRangeArg(getRevisionRange(r1, r2))
+          case _ =>
+            throw new InvalidArgumentException(s" is not a subset of the working copy history")
+        }
+        
+      case _  =>
+        throw new InvalidArgumentException(s" is not a valid <revision> or <revision>:<revision>")
     }
   }
 
@@ -548,8 +583,52 @@ object Bisect extends Command {
   private case object Terms extends BisectCommand {
     override val cmdName = "terms"
     
+    private case class Options(termGood: Boolean = false, termBad: Boolean = false)
+    
+    private def processCommandLine(args: Seq[String]): Options = {
+
+      val parser = new OptionParser[Options] {
+        val cmdPrefix = s"$scriptName $name $cmdName"
+        
+        banner = s"usage: $cmdPrefix [--term-good|--term-bad]"
+
+        flag("", "--term-good", "Display only the term for 'good'")
+          { options =>
+            if (options.termBad)
+              throw new InvalidArgumentException(" - this command does not accept multiple options")
+            options.copy(termGood = true)
+          }
+          
+        flag("", "--term-bad", "Display only the term for 'bad'")
+        { options =>
+          if (options.termGood)
+            throw new InvalidArgumentException(" - this command does not accept multiple options")
+          options.copy(termBad = true)
+        }
+          
+        flag("-h", "--help", "Show this message")
+            { _ => println(help); throw HelpException() }
+            
+        separator("")
+        separator(s"If no options are given then both terms are displayed")
+        separator(s"The current working copy revision is used by default")
+      }
+
+      parser.parse(args, Options())
+    }
+    
     override def run(args: Seq[String]): Unit = {
-      println("not yet implmented")
+      val data    = getBisectData()
+      val options = processCommandLine(args)
+      
+      if (options.termGood)
+        println(data.termGoodName)
+      else if (options.termBad)
+        println(data.termBadName)
+      else {
+        println(s"The term for the good state is ${blue(data.termGoodName)}")
+        println(s"The term for the bad  state is ${blue(data.termBadName)}")
+      }
     }
   }
   
@@ -557,8 +636,52 @@ object Bisect extends Command {
   private case object Skip extends BisectCommand {
     override val cmdName = "skip"
     
+    private case class Options(revisions: Set[String] = Set.empty)
+    
+    private def processCommandLine(args: Seq[String]): Options = {
+
+      val parser = new OptionParser[Options] {
+        val cmdPrefix = s"$scriptName $name $cmdName"
+        
+        addArgumentParser(revisionRangeArgParser)
+        
+        banner = s"usage: $cmdPrefix [<revision>|<revsion>:<revision>]..."
+
+        flag("-h", "--help", "Show this message")
+            { _ => println(help); throw HelpException() }
+            
+        arg[RevisionRangeArg] { (range, options) =>
+          options.copy(revisions = options.revisions ++ range.revisions)
+        }
+      }
+
+      parser.parse(args, Options())
+    }
+    
     override def run(args: Seq[String]): Unit = {
-      println("not yet implmented")
+      val options    = processCommandLine(args)
+      val data       = getBisectData()
+      val incoming   = if (options.revisions.nonEmpty) options.revisions else Set(getWorkingCopyInfo().commitRev)
+      val newSkipped = (incoming -- data.skipped).toSeq.sortWith(_.toInt > _.toInt)
+      
+      val statusData = if (newSkipped.nonEmpty) {
+        val newData = data.copy(skipped = data.skipped ++ incoming)
+        saveBisectData(newData)
+        newSkipped foreach (logBisectRevision(_, "skip"))
+        
+        if (newData.isReady)
+          performBisect(newData)
+  
+        logBisectCommand(cmdName +: args)
+        newData
+      }
+      else
+        data
+    
+      getWaitingStatus(statusData) foreach { status =>
+        appendToBisectLog(status)
+        println(status)
+      }          
     }
   }
   
@@ -566,8 +689,52 @@ object Bisect extends Command {
   private case object Unskip extends BisectCommand {
     override val cmdName = "unskip"
     
+    private case class Options(revisions: Set[String] = Set.empty)
+    
+    private def processCommandLine(args: Seq[String]): Options = {
+
+      val parser = new OptionParser[Options] {
+        val cmdPrefix = s"$scriptName $name $cmdName"
+        
+        addArgumentParser(revisionRangeArgParser)
+        
+        banner = s"usage: $cmdPrefix [<revision>|<revsion>:<revision>]..."
+
+        flag("-h", "--help", "Show this message")
+            { _ => println(help); throw HelpException() }
+            
+        arg[RevisionRangeArg] { (range, options) =>
+          options.copy(revisions = options.revisions ++ range.revisions)
+        }
+      }
+
+      parser.parse(args, Options())
+    }
+    
     override def run(args: Seq[String]): Unit = {
-      println("not yet implmented")
+      val options      = processCommandLine(args)
+      val data         = getBisectData()
+      val incoming     = if (options.revisions.nonEmpty) options.revisions else Set(getWorkingCopyInfo().commitRev)
+      val newUnskipped = (incoming intersect data.skipped).toSeq.sortWith(_.toInt > _.toInt)
+      
+      val statusData = if (newUnskipped.nonEmpty) {
+        val newData = data.copy(skipped = data.skipped -- incoming)
+        saveBisectData(newData)
+        newUnskipped foreach (logBisectRevision(_, "unskip"))
+        
+        if (newData.isReady)
+          performBisect(newData)
+  
+        logBisectCommand(cmdName +: args)
+        newData
+      }
+      else
+        data
+    
+      getWaitingStatus(statusData) foreach { status =>
+        appendToBisectLog(status)
+        println(status)
+      }          
     }
   }
   
