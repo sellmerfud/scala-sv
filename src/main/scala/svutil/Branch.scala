@@ -108,7 +108,7 @@ object Branch extends Command {
       case TAG(name)    => s"tag:$name"
       case _            => "cannot be determined"
     }
-    println(s"Current branch: ${green(branch)}")
+    println(s"Current branch: ${green(branch)} [${yellow(info.commitRev)}]")
   }
   
   override def run(args: Seq[String]): Unit = {
