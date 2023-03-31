@@ -156,21 +156,16 @@ object Bisect extends Command {
   private def logBisectCommand(cmdLine: Seq[String]): Unit = {
     appendToBisectLog((scriptPath +: name +: cmdLine).mkString(" "))
   }
-  
 
+  // Sort them because the range can start with either the high or low end
+  // and we alwasys work with ranges sorted form high to low (most recent revs first)
   private def getRevisionRange(rev1: String, rev2: String): Seq[String] = {
     val logXML = XML.loadString(runCmd(Seq("svn", "log", "--xml", "--quiet", s"--revision=$rev1:$rev2", ".")).mkString("\n"))
-    val revs = (logXML \ "logentry") map (node => parseLogEntry(node).revision)
-    // Sort them because the range can start with either the high or low end
-    // and we alwasys work with ranges sorted form high to low (most recent revs first)
-    revs.sortWith(_.toInt > _.toInt)
+    (logXML \ "logentry") map (parseLogEntry(_).revision)
   }
   
   //  Return the list of all revisions for the current working copy directory
-  private def getAllRevisions(): Seq[String] = {
-    val logXML = XML.loadString(runCmd(Seq("svn", "log", "--xml", "--quiet", "--revision=HEAD:0", ".")).mkString("\n"))
-    (logXML \ "logentry") map (node => parseLogEntry(node).revision)
-  }
+  private def getAllRevisions() = getRevisionRange("HEAD", "0")
   
   //  Get the list of log revisions for the working copy that are
   //  between maxRev and minRev exclusively
@@ -179,22 +174,20 @@ object Bisect extends Command {
     if (!data.isReady)
       throw new IllegalStateException("getCandidateRevisions() called when data not ready")
     
-    val rev1 = data.maxRev getOrElse "HEAD"
-    val rev2 = data.minRev getOrElse "0"
-    val logXML = XML.loadString(runCmd(Seq("svn", "log", "--xml", "--quiet", s"--revision=$rev1:$rev2", ".")).mkString("\n"))
-    val revList = (logXML \ "logentry") map (node => parseLogEntry(node).revision)
-    // Remove the maxRev and minRev entries
-    // revList.drop(1).dropRight(1)
-    revList drop 1 dropRight 1
+    val maxRev  = data.maxRev getOrElse "HEAD"
+    val minRev  = data.minRev getOrElse "0"
+    val revList = getRevisionRange(maxRev, minRev)
+    
+    revList drop 1 dropRight 1 // Remove the endpoints - maxRev and minRev
   }
     
   private def getWaitingStatus(data: BisectData): Option[String] = {
     val bad  = data.termBadName
     val good = data.termGoodName
     (data.maxRev, data.minRev) match {
-      case (None, None)    => Some(s"status: waiting for both $good and $bad revisions")
-      case (Some(_), None) => Some(s"status: waiting for a $good revision")
-      case (None, Some(_)) => Some(s"status: waiting for a $bad revision")
+      case (None, None)    => Some(s"status: waiting for both '$good' and '$bad' revisions")
+      case (Some(_), None) => Some(s"status: waiting for a '$good' revision")
+      case (None, Some(_)) => Some(s"status: waiting for a '$bad' revision")
       case _               => None
     }
   }
@@ -312,9 +305,14 @@ object Bisect extends Command {
         }
 
       case validRange(rev1, rev2) =>
+        // Alwasy get range in order from hightest revision to lowest revision.
         (resolveWorkingCopyRevision(rev1), resolveWorkingCopyRevision(rev2)) match {
-          case (Some(r1), Some(r2)) =>
+          case (Some(r1), Some(r2)) if r1.toInt >= r2.toInt =>
             RevisionRangeArg(getRevisionRange(r1, r2))
+            
+          case (Some(r1), Some(r2)) =>
+            RevisionRangeArg(getRevisionRange(r2, r1))  //  Revs reversed (high to low)
+            
           case _ =>
             throw new InvalidArgumentException(s" is not a subset of the working copy history")
         }
@@ -428,7 +426,7 @@ object Bisect extends Command {
           data.maxRev foreach (logBisectRevision(_, data.termBadName))
           data.minRev foreach (logBisectRevision(_, data.termGoodName))
           getWaitingStatus(data) foreach { status =>
-            appendToBisectLog(status)
+            appendToBisectLog(s"# $status")
             println(status)
           }          
           
@@ -505,7 +503,7 @@ object Bisect extends Command {
       }
       
       getWaitingStatus(statusData) foreach { status =>
-        appendToBisectLog(status)
+        appendToBisectLog(s"# $status")
         println(status)
       }          
     }
@@ -576,7 +574,7 @@ object Bisect extends Command {
       }
       
       getWaitingStatus(statusData) foreach { status =>
-        appendToBisectLog(status)
+        appendToBisectLog(s"# $status")
         println(status)
       }          
     }
@@ -631,6 +629,7 @@ object Bisect extends Command {
       else {
         println(s"The term for the good state is ${blue(data.termGoodName)}")
         println(s"The term for the bad  state is ${blue(data.termBadName)}")
+        getWaitingStatus(data) foreach println
       }
     }
   }
@@ -682,7 +681,7 @@ object Bisect extends Command {
         data
     
       getWaitingStatus(statusData) foreach { status =>
-        appendToBisectLog(status)
+        appendToBisectLog(s"# $status")
         println(status)
       }          
     }
@@ -735,7 +734,7 @@ object Bisect extends Command {
         data
     
       getWaitingStatus(statusData) foreach { status =>
-        appendToBisectLog(status)
+        appendToBisectLog(s"# $status")
         println(status)
       }          
     }
@@ -814,7 +813,7 @@ object Bisect extends Command {
         
         banner = s"usage: $cmdPrefix [<options>] [<revision>]"
 
-        bool("", "--update",    "Update the working.  (Default is yes)")
+        bool("", "--update",    "Update working copy.  (Default is yes)")
           { (value, options) => options.copy(update = value) }
           
         flag("-h", "--help", "Show this message")
@@ -825,7 +824,7 @@ object Bisect extends Command {
         separator("")
         separator(s"The default is to update your working copy to its original revision before the bisect")
         separator(s"If a <revision> is specified, then the working copy will be updated to it insstead")
-        separator(s"You can also elect to keep you working copy as it is with --no-update")
+        separator(s"You can also elect to keep your working copy as it is with --no-update")
       }
 
       parser.parse(args, Options())
