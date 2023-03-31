@@ -7,7 +7,6 @@ import java.util.regex.PatternSyntaxException
 import scala.xml._
 import Exec.runCmd
 import Color._
-import svutil.exceptions._
 import Utilities._
 
 object Branch extends Command {

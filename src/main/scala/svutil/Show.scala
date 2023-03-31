@@ -7,7 +7,6 @@ import scala.util.matching.Regex
 import scala.xml._
 import Exec.{ runCmd, ExecError }
 import Color._
-import svutil.exceptions._
 import Utilities._
 
 object Show extends Command {
@@ -16,7 +15,7 @@ object Show extends Command {
   override val description = "Show the details of a revision"
   
   case class Options(
-    rev:       Option[String] = None,
+    revision:  Option[String] = None,
     path:      String         = ".",
     showMsg:   Boolean        = true,
     showPaths: Boolean        = true,
@@ -30,7 +29,7 @@ object Show extends Command {
       banner = s"usage: $scriptName $name [<options>] [<path>|<url>]"
       
       reqd[String]("-r", "--revision=<revision>", "Repository revision of the commit to show")
-        { (rev, options) => options.copy(rev = Some(rev)) }
+        { (rev, options) => options.copy(revision = Some(rev)) }
 
       bool("-m", "--message", "Show the commit message (default yes)")
         { (value, options) => options.copy(showMsg = value) }
@@ -59,23 +58,30 @@ object Show extends Command {
   
   
   private def getLogEntry(options: Options): Option[LogEntry] = {
-    val revArg   = (options.rev map (r => s"--revision=$r")).toSeq
+    val revArg   = (options.revision map (r => s"--revision=$r")).toSeq
     val pathsArg = (if (options.showPaths) Some("--verbose") else None).toSeq
     val cmdLine  = Seq("svn", "log", "--xml", "--limit=1") ++ revArg ++ pathsArg :+ options.path
     val logXML   = XML.loadString(runCmd(cmdLine).mkString("\n"))
     (logXML \ "logentry").headOption map parseLogEntry
   }
   
+  def looksLikeRevision(str: String): Boolean = """^(\d+|HEAD|BASE|PREV|COMMITTED)$""".r matches str
   
   override def run(args: Seq[String]): Unit = {
     val options = processCommandLine(args)
-    val fileInfo = getSvnInfo(options.path, options.rev)
-    getLogEntry(options) foreach { log =>
+    // If no revision is given an the path argument looks like a revision
+    // then treat it as a revision for the current working directory
+    val finalOptions = if (options.revision.isEmpty && looksLikeRevision(options.path))
+      options.copy(path = ".", revision = Some(options.path))
+      else
+        options
+    
+    getLogEntry(finalOptions) foreach { log =>
       println()
-      println(blue(options.path))
-      showCommit(log, options.showMsg, options.showPaths)
-      if (options.showDiff)
-        showChangeDiff(options.path, log.revision)
+      println(blue(finalOptions.path))
+      showCommit(log, finalOptions.showMsg, finalOptions.showPaths)
+      if (finalOptions.showDiff)
+        showChangeDiff(finalOptions.path, log.revision)
     }
   } 
 }

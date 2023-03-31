@@ -7,7 +7,6 @@ import scala.util.matching.Regex
 import scala.xml._
 import Exec.{ runCmd, ExecError }
 import Color._
-import svutil.exceptions._
 import Utilities._
 
 object Ignore extends Command {

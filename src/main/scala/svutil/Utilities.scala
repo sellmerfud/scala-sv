@@ -9,15 +9,19 @@ import java.io.File
 import scala.xml._
 import Exec._
 import Color._
-import exceptions._
 
 object Utilities {
   
   lazy val scriptPath = propOrElse("sv.scriptname", "sv")
   lazy val scriptName = new File(scriptPath).getName
   
+  case class GeneralError(message: String = "") extends Exception(message)
+  case class HelpException() extends Exception("Help Exception")
+  case class SuccessExit(message: String = "") extends Exception(message)
   
-  def generalError(msg: String): Nothing = throw new GeneralError(msg)
+  def generalError(msg: String): Nothing = throw GeneralError(msg)
+  
+  def successExit(msg: String): Nothing = throw SuccessExit(msg)
   
   implicit class StringWrapper(str: String) {
     def chomp(suffix: String = "\n"): String = suffix match {
@@ -27,6 +31,7 @@ object Utilities {
       case suf   if str.endsWith(suf) => str.reverse.drop(suf.length).reverse.toString
       case _ => str
     }
+    def isInteger = str forall (_.isDigit)
   }
   
   def joinPaths(base: String, others: String*): String = {

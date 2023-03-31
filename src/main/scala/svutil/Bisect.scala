@@ -11,8 +11,7 @@ import scala.xml._
 import scala.util.{ Try, Success, Failure }
 import com.typesafe.config._
 import org.sellmerfud.optparse._
-import svutil.exceptions._
-import Exec.{ runCmd, ExecError }
+import Exec._
 import Color._
 import Utilities._
 
@@ -222,14 +221,14 @@ object Bisect extends Command {
     
     if (nonSkippedRevs.isEmpty) {
       if (candidateRevs.nonEmpty) {
-          println("There are only skipped revisions left to test.")
+          println("\nThere are only skipped revisions left to test.")
           println(s"The first '${data.termBadName}' commit could be any of:")
           for (rev <- maxRev +: candidateRevs)
             println(yellow(rev))
           println("We cannot bisect more!")
       }
       else {
-        println(s"The first '${data.termBadName}' commit is: ${yellow(maxRev)}")
+        println(s"\nThe first '${data.termBadName}' commit is: ${yellow(maxRev)}")
         getLogEntry(maxRev, withPaths = true) foreach { log => showCommit(log) }
       }
     }
@@ -247,6 +246,11 @@ object Bisect extends Command {
     }
   }
   
+  private def bisectIsComplete(data: BisectData): Boolean = {
+    val candidateRevs  = getCandidateRevisions(data)
+    val nonSkippedRevs = candidateRevs filterNot data.skipped.contains
+    nonSkippedRevs.isEmpty
+  }
   
   private def updateWorkingCopy(revision: String): Unit = {
     val msg1st  = get1stLogMessage(revision) getOrElse ""
@@ -266,7 +270,7 @@ object Bisect extends Command {
   //  For HEAD, BASE, COMMITTED, PREV we have to specify a range and limit
   //  in order for subversion to return the log entry.
   private def resolveWorkingCopyRevision(rev: String): Option[String] = {
-    val revArgs = if (isInteger(rev))
+    val revArgs = if (rev.isInteger)
       Seq(s"--revision=$rev")
     else
       Seq(s"--revision=$rev:0", "--limit=1")
@@ -279,7 +283,6 @@ object Bisect extends Command {
     }
   }
 
-  private def isInteger(str: String) = str forall (_.isDigit)
   
   // Argument Types with associated argument parsers
   // ========================================================
@@ -741,9 +744,58 @@ object Bisect extends Command {
   // == Run Command ======================================================
   private case object Run extends BisectCommand {
     override val cmdName = "run"
+    val cmdPrefix = s"$scriptName $name $cmdName"
 
+    private def processCommandLine(args: Seq[String]): Unit = {
+
+      val parser = new OptionParser[Int] {
+        
+        banner = s"usage: $cmdPrefix <cmd> [<arg>...]"
+
+        flag("-h", "--help", "Show this message")
+            { _ => println(help); throw HelpException() }
+      }
+
+      parser.parse(args, 0)
+    }
+
+    //  Run the supplied command continuously until we reach
+    //  the end of the bisect session and find the target revsion
+    //  
+    //  If the command returns:
+    //  ------------------------------------------------------------
+    //  0                      The current commit is good
+    //  125                    The curent commit should be skipped
+    //  1 - 127 (except 125)   The current commit is bad
+    //  128 - 255              The bisect session should be aborted
+     
     override def run(args: Seq[String]): Unit = {
-      println("not yet implmented")
+      //  See if we should display help
+      processCommandLine(if (args.isEmpty) Seq("--help") else args)
+      val initialData = getBisectData()
+      
+      getWaitingStatus(initialData) foreach println
+      
+      if (!initialData.isReady)
+        generalError(s"$cmdPrefix cannot be used until a '${initialData.termGoodName}' revsion and '${initialData.termBadName}' revision have been supplied")
+
+      def runCommand(): Unit = {
+        val data = getBisectData()  // Get fresh data
+
+        if (bisectIsComplete(data))
+          successExit(s"$cmdPrefix: bisect is complete")
+        
+        exec(args, None, new ConsoleExecLogger) match {
+          case 0            => Good.run(Nil)
+          case 125          => Skip.run(Nil)
+          case r if r < 128 => Bad.run(Nil)
+          case r            => generalError(s"$cmdPrefix: failed.  Command '${args.head}' returned unrecoverable error code ($r)")
+        }
+        runCommand()
+      }
+
+      // Start it off
+      runCommand()
     }
   }
     

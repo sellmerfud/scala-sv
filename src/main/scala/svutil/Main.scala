@@ -3,7 +3,6 @@ package svutil
 
 import java.io.{ IOException, BufferedReader, InputStreamReader }
 import scala.util.{ Try, Success, Failure }
-import svutil.exceptions._
 import Exec.ExecError
 import Utilities._
 import org.sellmerfud.optparse.OptionParserException

@@ -6,7 +6,6 @@ import scala.util.matching.Regex
 import java.time.LocalDateTime
 import Color._
 import Exec.runCmd
-import svutil.exceptions._
 import Utilities._
 
 object Log extends Command {

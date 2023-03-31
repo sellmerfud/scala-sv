@@ -9,7 +9,6 @@ import scala.xml._
 import scala.util.{ Try, Success, Failure }
 import Exec.runCmd
 import Color._
-import svutil.exceptions._
 import Utilities._
 
 object FileRevs extends Command {
