@@ -2,6 +2,7 @@
 package svutil
 
 import java.io.{ IOException, BufferedReader, InputStreamReader }
+import scala.util.{ Try, Success, Failure }
 import svutil.exceptions._
 import Exec.ExecError
 import Utilities._
@@ -36,7 +37,7 @@ object Main {
   
   lazy val commands = Log::Branch::Show::FileRevs::Bisect::Ignore :: Nil
   
-  def showHelp(scriptName: String): Unit = {
+  def showHelp(): Unit = {
     val usage = s"""|usage: $scriptName [-v | --version]
                     |       $scriptName [-h | --help | help]
                     |       $scriptName <command> [<args>]
@@ -71,8 +72,15 @@ object Main {
       println(s"Subversion Utilities version $SOFTWARE_VERSION")
       STATUS_OK
     }
-    else if ((mainOpts contains "--help") || (mainOpts contains "-h") || (cmdName == "help")) {
-      showHelp(scriptName)
+    else if ((mainOpts contains "--help") || (mainOpts contains "-h")) {
+      showHelp()
+      STATUS_OK
+    }
+    else if (cmdName == "help") {
+      (cmdArgs.drop(1).headOption map matchCommand) match {
+          case Some(cmd::Nil) => Try(cmd.run(Seq("--help")))
+          case _ =>showHelp()
+      }
       STATUS_OK
     }
     else {
