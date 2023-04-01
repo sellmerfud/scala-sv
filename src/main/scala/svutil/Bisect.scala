@@ -268,14 +268,20 @@ object Bisect extends Command {
     println((scriptName +: name +: cmdLine).mkString(" "))
   }
 
-  // Sort them because the range can start with either the high or low end
-  // and we alwasys work with ranges sorted form high to low (most recent revs first)
-  private def getExtantRevisions(rev1: String, rev2: String): Seq[ExtantEntry] = {
+  //  We return the actual maxRev and minRev that exist in the history for
+  //  the requested range
+  private def getExtantRevisions(rev1: String, rev2: String): (String, String, Seq[ExtantEntry]) = {
     println(s"Fetching history from ${yellow(rev1)} to ${yellow(rev2)}")
-    val logXML = XML.loadString(runCmd(Seq("svn", "log", "--xml", s"--revision=$rev1:$rev2", ".")).mkString("\n"))
-    (logXML \ "logentry") map { node =>
+    val logXML = XML.loadString(runCmd(Seq("svn", "log", "--xml", "--stop-on-copy", s"--revision=$rev1:$rev2", ".")).mkString("\n"))
+    val extants = (logXML \ "logentry") map { node =>
       val entry = parseLogEntry(node)
       ExtantEntry(entry.revision, entry.msg.headOption getOrElse "")
+    }
+    
+    extants.size match {
+      case 0 => generalError(s"There is no working copy history in range $rev1 to $rev2")
+      case 1 => generalError(s"There is only one commit in the working copy history range $rev1 to $rev2")
+      case _ => (extants.head.revision, extants.last.revision, extants)
     }
   }
   
@@ -290,10 +296,9 @@ object Bisect extends Command {
     }
   }
   
-  private def getLogEntry(revision: String, withPaths: Boolean = false, stopOnCopy: Boolean = false): Option[LogEntry] = {
+  private def getLogEntry(revision: String, withPaths: Boolean = false): Option[LogEntry] = {
     val verbose  = if (withPaths) Seq("--verbose") else Seq.empty
-    val stopArg  = if (stopOnCopy) Seq("--stop-on-copy") else Seq.empty
-    val cmdLine  = Seq("svn", "log", "--xml", s"--revision=$revision", "--limit=1", ".") ++ verbose ++ stopArg
+    val cmdLine  = Seq("svn", "log", "--xml", s"--revision=$revision", "--limit=1", ".") ++ verbose
     val logXML   = XML.loadString(runCmd(cmdLine).mkString("\n"))
     (logXML \ "logentry").headOption map parseLogEntry
   }
@@ -510,19 +515,24 @@ object Bisect extends Command {
               
             case _ =>
           }
-          
+
           // If we have both bad and good then get the revisions between the two
           val badAndGood = (options.bad zip options.good).headOption
-          val extantRevs = badAndGood map { case (bad, good) => getExtantRevisions(bad, good) } getOrElse Seq.empty
+          val (maxRev, minRev, extantRevs) = badAndGood map { case (bad, good) =>
+            val (maxR, minR, extants) = getExtantRevisions(bad, good)
+            (Some(maxR), Some(minR), extants)
+          } getOrElse {
+            (options.bad, options.good, Seq.empty) 
+          }
           
           // save the bisect data in order to start a new session.
           val data = BisectData(
             localPath   = cwd.toString,
             originalRev = getWorkingCopyInfo().commitRev,
-            maxRev      = options.bad,
-            minRev      = options.good,
-            startMaxRev = options.bad,
-            startMinRev = options.good,
+            maxRev      = maxRev,
+            minRev      = minRev,
+            startMaxRev = maxRev,
+            startMinRev = minRev,
             extantRevs  = extantRevs,
             termBad     = options.termBad,
             termGood    = options.termGood)
@@ -606,20 +616,25 @@ object Bisect extends Command {
     //  If this revision was previously skipped, it is no longer skipped
     def markBadRevision(revision: String): Boolean = {
       val data    = getBisectData()
-      val newData = if (data.isReady)
+      val newData = if (data.isReady) {
         data.copy(maxRev = Some(revision), skipped = data.skipped - revision)
+      }
+      else if (data.startMinRev.isDefined) {
+        //  We are becoming ready
+        val (maxRev, minRev, extantRevs) = getExtantRevisions(revision, data.startMinRev.get)
+        data.copy(
+          maxRev      = Some(maxRev),
+          startMaxRev = Some(maxRev),
+          minRev      = Some(minRev),
+          startMinRev = Some(minRev),
+          skipped     = data.skipped - revision,
+          extantRevs  = extantRevs)
+      }
       else {
-        val startMaxRev = data.startMaxRev getOrElse revision
-        val extantRevs = if (data.startMinRev.isDefined)
-          getExtantRevisions(revision, data.startMinRev.get)
-        else
-          data.extantRevs
-
         data.copy(
           maxRev      = Some(revision),
           startMaxRev = Some(revision),
-          skipped     = data.skipped - revision,
-          extantRevs  = extantRevs)
+          skipped     = data.skipped - revision)
       }
       
       saveBisectData(newData)
@@ -688,20 +703,25 @@ object Bisect extends Command {
     //  If this revision was previously skipped, it is no longer skipped
     def markGoodRevision(revision: String): Boolean = {
       val data    = getBisectData()
-      val newData = if (data.isReady)
+      val newData = if (data.isReady) {
         data.copy(minRev = Some(revision), skipped = data.skipped - revision)
+      }
+      else if (data.startMaxRev.isDefined) {
+        //  We are becoming ready
+        val (maxRev, minRev, extantRevs) = getExtantRevisions(revision, data.startMinRev.get)
+        data.copy(
+          maxRev      = Some(maxRev),
+          startMaxRev = Some(maxRev),
+          minRev      = Some(minRev),
+          startMinRev = Some(minRev),
+          skipped     = data.skipped - revision,
+          extantRevs  = extantRevs)
+      }
       else {
-        val startMinRev = data.startMinRev getOrElse revision
-        val extantRevs  = if (data.startMaxRev.isDefined)
-          getExtantRevisions(data.startMaxRev.get, revision)
-        else
-          data.extantRevs
-        
         data.copy(
           minRev      = Some(revision),
           startMinRev = Some(revision),
-          skipped     = data.skipped - revision,
-          extantRevs  = extantRevs)
+          skipped     = data.skipped - revision)
       }
 
       saveBisectData(newData)
