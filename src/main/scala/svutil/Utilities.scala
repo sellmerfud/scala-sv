@@ -178,6 +178,7 @@ object Utilities {
       
       for (listNode <- listNodes.toList) yield {
         val path = listNode.attributes("path").head.text
+        
         val entries = for (entryNode <- (listNode \ "entry").toList) yield {
           val commit = (entryNode \ "commit").head
           ListEntry(
@@ -185,7 +186,7 @@ object Utilities {
             kind         = entryNode.attributes("kind").head.text,
             size         = (entryNode \ "size").headOption map (_.text.toLong),
             commitRev    = commit.attributes("revision").head.text,
-            commitAuthor = (commit \ "author").head.text,
+            commitAuthor = (commit \ "author").headOption map (_.text) getOrElse "",
             commitDate   = parseISODate((commit \ "date").head.text))
         }
         
