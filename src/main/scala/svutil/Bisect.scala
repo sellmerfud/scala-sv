@@ -1059,7 +1059,22 @@ object Bisect extends Command {
   private case object Log extends BisectCommand {
     override val cmdName = "log"
 
+    private def processCommandLine(args: Seq[String]): Unit = {
+
+      val parser = new OptionParser[Unit] {
+        val cmdPrefix = s"$scriptName $name $cmdName"
+        
+        banner = s"usage: $cmdPrefix [<options>]"
+
+        flag("-h", "--help", "Show this message")
+            { _ => println(help); throw HelpException() }
+      }
+
+      parser.parse(args, ())
+    }
+
     override def run(args: Seq[String]): Unit = {
+      processCommandLine(args)
       getBisectData() // Make sure a bisect session has been started
       displayBisectLog()
     }
@@ -1068,9 +1083,41 @@ object Bisect extends Command {
   // == Replay Command ===================================================
   private case object Replay extends BisectCommand {
     override val cmdName = "replay"
+    
+    private case class Options(logFile: Option[File] = None)
+    
+    private def processCommandLine(args: Seq[String]): Options = {
+
+      val parser = new OptionParser[Options] {
+        val cmdPrefix = s"$scriptName $name $cmdName"
+        
+        addArgumentParser(revisionArgParser)
+        
+        banner = s"usage: $cmdPrefix [<options>] <log file>"
+
+        flag("-h", "--help", "Show this message")
+            { _ => println(help); throw HelpException() }
+            
+        arg[File] { (value, options) => options.copy(logFile = Some(value)) }  
+      }
+
+      parser.parse(args, Options())
+    }
 
     override def run(args: Seq[String]): Unit = {
-      println("not yet implmented")
+      val options = processCommandLine(args)
+      
+      options.logFile match {
+        case None       =>
+          generalError("You must specify a log file to replay")
+          
+        case Some(file) if !file.exists =>
+          generalError(s"File '$file' does not exist")
+          
+        case Some(file) =>
+          val cmdLine = Seq("/bin/sh", "-c", file.toString)
+          exec(cmdLine, None, new ConsoleExecLogger)
+      }
     }
   }
     
@@ -1109,7 +1156,7 @@ object Bisect extends Command {
   private def getBisectCommand(cmdName: String, termBad: Option[String], termGood: Option[String]): BisectCommand = {
     val cmdList = bisectCommands.map(_.cmdName) ::: termBad.toList ::: termGood.toList
     matchCommand(cmdName, cmdList) match {
-      case Nil                                         => showHelp()
+      case Nil                                   => showHelp()
       case name :: Nil if Some(name) == termBad  => Bad
       case name :: Nil if Some(name) == termGood => Good
       case name :: Nil                           => bisectCommands.find(_.cmdName == name).get
