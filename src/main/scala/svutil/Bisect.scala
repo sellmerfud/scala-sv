@@ -3,7 +3,7 @@
 package svutil
 
 import java.io.{ File, FileWriter, PrintWriter,  FileReader, BufferedReader }
-import java.nio.file.Files
+import java.nio.file.{ Files, Paths, Path }
 import java.time._
 import scala.xml._
 import scala.jdk.CollectionConverters._
@@ -20,9 +20,6 @@ object Bisect extends Command {
   override val name = "bisect"
   override val description = "Use binary search to find the commit that introduced a bug"
 
-  private val bisectDataFile = new File("./.svn/tmp/sv_bisect_data.json")
-  private val bisectLogFile  = new File("./.svn/tmp/sv_bisect_log")
-
   // Ordering for a sequence of revisions
   // We sort them from High (most recent) to Low(least recent)
   val RevisionOrdering: Ordering[String] = Ordering.by { revision => -revision.toInt }
@@ -30,6 +27,7 @@ object Bisect extends Command {
   private case class BisectData(
     repoMin:     Int,
     repoMax:     Int,
+    localPath:   String,
     originalRev: String,                      // original working copy revision. Used to reset working copy
     maxRev:      Option[String] = None,       // maximum revision number in our list that is still being checked
     minRev:      Option[String] = None,       // minimum revision number in our list that is still being checked
@@ -52,6 +50,7 @@ object Bisect extends Command {
     ConfigValueFactory.fromMap(Map(
       "repoMin"     -> data.repoMin,
       "repoMax"     -> data.repoMax,
+      "localPath"   -> data.localPath,
       "originalRev" -> data.originalRev,
       "maxRev"      -> data.maxRev.getOrElse(null),
       "minRev"      -> data.minRev.getOrElse(null),
@@ -64,6 +63,7 @@ object Bisect extends Command {
   private def fromConfig(cfg: Config) = BisectData(
     cfg.getInt("repoMin"),
     cfg.getInt("repoMax"),
+    cfg.getString("localPath"),
     cfg.getString("originalRev"),
     cfg.optString("maxRev"),
     cfg.optString("minRev"),
@@ -72,47 +72,103 @@ object Bisect extends Command {
     cfg.optString("termGood"),
   )
 
+  private def findSvnDir(): File = {
+    def findIt(directory: Path): File = {
+      if (directory == null)
+        generalError(s"You must run this command from within a subversion working copy directory")
+      else
+        directory.resolve(".svn").toFile match {
+          case svn if svn.isDirectory => svn
+          case _                      => findIt(directory.getParent) 
+        }
+    }
+    
+    // Start with the current working directory
+    findIt(Paths.get("").toAbsolutePath)
+  }
+  
+  
+  private def findSvnTmp(): File = {
+
+      def findIt(directory: Path): File = {
+        if (directory == null)
+          generalError(s"Your current working directory is not with a subversion working copy")
+        else if (directory.resolve(".svn").toFile.isDirectory) {
+          // Found the .svn directory
+          val tmpDir = directory.resolve(".svn/tmp").toFile
+          if (tmpDir.isDirectory) {
+              if (tmpDir.canRead && tmpDir.canWrite)
+                tmpDir
+              else
+                generalError(s"Error, insufficent file permissions for ${tmpDir}")
+          }
+          else if (tmpDir.isFile)
+            generalError(s"Error, ${tmpDir} is not a directory")
+          else if (tmpDir.mkdir())
+            tmpDir
+          else
+            generalError(s"Error, ${tmpDir} does not exist and cannot be created")
+        }
+        else
+          findIt(directory.getParent)
+      }
+      
+      // Start with the current working directory
+      findIt(Paths.get("").toAbsolutePath)
+  }
+  
   //  Verifiy that the currrent working directory is an SVN working copy
   //  and that we are at the top of that working copy.
   private def getWorkingCopyInfo(): SvnInfo = {
     try getSvnInfo(".")
     catch {
       case ExecError(_, _) =>
-        generalError(s"$scriptName $name must be run from the top of a subversion working copy directory tree.")
+        generalError(s"$scriptName $name must be run from within a subversion working copy directory.")
         
       case e: Throwable =>
         generalError("Error verifying working copy\n" + (Option(e.getMessage) getOrElse e.getClass.getName))
     }
   }
     
+  private def bisectDataFile = new File(findSvnDir(), "tmp/sv_bisect_data.json")
+  private def bisectLogFile  = new File(findSvnDir(), "tmp/sv_bisect_log")
+    
+    
   private def loadBisectData(): Option[BisectData] = {
-    if (bisectDataFile.isFile && bisectDataFile.canRead) {
+    val dataFile = bisectDataFile
+    
+    if (dataFile.isFile && dataFile.canRead) {
       try {
-        val config = ConfigFactory.parseFile(bisectDataFile, ConfigParseOptions.defaults.setSyntax(ConfigSyntax.JSON))
-        Some(fromConfig(config))
+        val config = ConfigFactory.parseFile(dataFile, ConfigParseOptions.defaults.setSyntax(ConfigSyntax.JSON))
+        val data   = fromConfig(config)
+        val cwd    = Paths.get("").toAbsolutePath
+        if (cwd.toString != data.localPath)
+          generalError(s"$scriptName $name must be run from the same directory where the bisect session was started: ${data.localPath}")
+        Some(data)
       }
       catch {
         case e: Throwable => 
-          generalError(s"Error reading bisect data ($bisectDataFile): ${e.getMessage}")
+          generalError(s"Error reading bisect data ($dataFile): ${e.getMessage}")
       }
     }
-    else if (bisectDataFile.isFile) {
-      generalError(s"Unable to read bisect data ($bisectDataFile): Check file permissions")
+    else if (dataFile.isFile) {
+      generalError(s"Unable to read bisect data ($dataFile): Check file permissions")
     }
     else
       None
   }
   
   def saveBisectData(data: BisectData): Unit = {
+    val dataFile = bisectDataFile
     try {
       val opts   = ConfigRenderOptions.concise.setJson(true).setFormatted(true)
-      val writer = new FileWriter(bisectDataFile)
+      val writer = new FileWriter(dataFile)
       writer.write(toConfigObject(data).toConfig.root.render(opts))
       writer.close
     } 
     catch {
       case e: Throwable =>
-        generalError(s"Error saving bisect data ($bisectDataFile): ${e.getMessage}")
+        generalError(s"Error saving bisect data ($dataFile): ${e.getMessage}")
     }
   }  
   
@@ -121,7 +177,7 @@ object Bisect extends Command {
   //  if the data file is missing.
   private def getBisectData(): BisectData = {
     loadBisectData() getOrElse {
-      generalError(s"You must first start a bisect session with '$scriptName $name ${Start.cmdName}")
+      generalError(s"You must first start a bisect session with '$scriptName $name ${Start.cmdName}'")
     }
   }
   
@@ -396,6 +452,12 @@ object Bisect extends Command {
 
     override def run(args: Seq[String]): Unit = {
       val options = processCommandLine(args)
+      val cwd     = Paths.get("").toAbsolutePath
+      val svnDir  = findSvnDir()
+      val tmpDir  = new File(svnDir, "tmp")
+      
+      if (!tmpDir.isDirectory && !tmpDir.mkdir())
+        generalError(s"Cannot acesss the temporary directory: $tmpDir")
       
       loadBisectData() match {
         case Some(data) =>
@@ -437,6 +499,7 @@ object Bisect extends Command {
           val data = BisectData(
             repoMin     = repoMin,
             repoMax     = repoMax,
+            localPath   = cwd.toString,
             originalRev = getWorkingCopyInfo().commitRev,
             maxRev      = badRev map (_.toString),
             minRev      = goodRev map (_.toString),
@@ -446,8 +509,8 @@ object Bisect extends Command {
           bisectLogFile.delete()  // Remove any previous log file.
 
           appendToBisectLog("#!/usr/bin/env sh")
-          appendToBisectLog(s"# $scriptName $name log file")
-          appendToBisectLog(s"# created: ${displayDateTime(LocalDateTime.now)}")
+          appendToBisectLog(s"# $scriptName $name log file  ${displayDateTime(LocalDateTime.now)}")
+          appendToBisectLog(s"# Initiated from: $cwd")
           appendToBisectLog(s"# ----------------------------")
           data.maxRev foreach (logBisectRevision(_, data.termBadName))
           data.minRev foreach (logBisectRevision(_, data.termGoodName))
@@ -495,7 +558,8 @@ object Bisect extends Command {
     override def run(args: Seq[String]): Unit = {
       val data     = getBisectData()
       val options  = processCommandLine(args, data.termBadName)
-      val revision = options.revision getOrElse getWorkingCopyInfo().commitRev
+      val fixedRev = options.revision map (r => (r.toInt min data.repoMax).toString)
+      val revision = fixedRev getOrElse getWorkingCopyInfo().commitRev
       val minRev   = data.minRev map (_.toInt) getOrElse -1
       
       // The new bad revision can come after the existing maxRev
@@ -503,10 +567,8 @@ object Bisect extends Command {
       // The new bad revsion cannot be less than or equal to the minRev
       if (revision.toInt <= data.repoMin)
         println(s"'${data.termBadName}' revision cannot be the oldest revision in the repository")
-      else if (revision.toInt == minRev)
-        println(s"'${data.termBadName}' revision cannot be the same as the '${data.termGoodName}' revision")
-      else if (revision.toInt < minRev)
-        println(s"'${data.termBadName}' revision cannot be older than the '${data.termGoodName}' revision")
+      else if (revision.toInt <= minRev)
+        println(s"'${data.termBadName}' revision must be more recent than the '${data.termGoodName}' revision")
       else {
         markBadRevision(revision)
         logBisectCommand(data.termBadName +: args)
@@ -563,7 +625,8 @@ object Bisect extends Command {
     override def run(args: Seq[String]): Unit = {
       val data     = getBisectData()
       val options  = processCommandLine(args, data.termGoodName)
-      val revision = options.revision getOrElse getWorkingCopyInfo().commitRev
+      val fixedRev = options.revision map (r => (r.toInt max data.repoMin).toString)
+      val revision = fixedRev getOrElse getWorkingCopyInfo().commitRev
       val maxRev   = data.maxRev map (_.toInt) getOrElse Int.MaxValue
       
       // The new good revision can come before the exisiing minRev
@@ -571,10 +634,8 @@ object Bisect extends Command {
       // The new good revsion cannot be greater than or equal to the maxRev
       val statusData = if (revision.toInt >= data.repoMax)
         println(s"'${data.termGoodName}' revision cannot be the newest revision in the repository")
-      else if (revision.toInt == maxRev)
-        println(s"'${data.termGoodName}' revision cannot be the same as the '${data.termBadName}' revision")
-      else if (revision.toInt > maxRev)
-        println(s"'${data.termGoodName}' revision cannot be newer than the '${data.termBadName}' revision")
+      else if (revision.toInt >= maxRev)
+        println(s"'${data.termGoodName}' revision must be older than the '${data.termBadName}' revision")
       else {
         markGoodRevision(revision)
         logBisectCommand(data.termGoodName +: args)
