@@ -22,6 +22,10 @@ object Bisect extends Command {
 
   private val bisectDataFile = new File("./.svn/tmp/sv_bisect_data.json")
   private val bisectLogFile  = new File("./.svn/tmp/sv_bisect_log")
+
+  // Ordering for a sequence of revisions
+  // We sort them from High (most recent) to Low(least recent)
+  val RevisionOrdering: Ordering[String] = Ordering.by { revision => -revision.toInt }
   
   private case class BisectData(
     repoMin:     Int,
@@ -162,6 +166,11 @@ object Bisect extends Command {
   private def logBisectCommand(cmdLine: Seq[String]): Unit = {
     appendToBisectLog((scriptPath +: name +: cmdLine).mkString(" "))
   }
+  
+  // The cmdLine should start with the biscect sub command
+  private def displayBisectCommand(cmdLine: Seq[String]): Unit = {
+    println((scriptName +: name +: cmdLine).mkString(" "))
+  }
 
   // Sort them because the range can start with either the high or low end
   // and we alwasys work with ranges sorted form high to low (most recent revs first)
@@ -201,7 +210,7 @@ object Bisect extends Command {
   
   private def getLogEntry(revision: String, withPaths: Boolean = false): Option[LogEntry] = {
     val verbose  = if (withPaths) Seq("--verbose") else Seq.empty
-    val cmdLine  = Seq("svn", "log", "--xml", s"--revision=$revision", "--limit=1", ".") ++ verbose
+    val cmdLine  = Seq("svn", "log", "--xml", "--stop-on-copy", s"--revision=$revision", "--limit=1", ".") ++ verbose
     val logXML   = XML.loadString(runCmd(cmdLine).mkString("\n"))
     (logXML \ "logentry").headOption map parseLogEntry
   }
@@ -210,7 +219,8 @@ object Bisect extends Command {
     getLogEntry(revision) flatMap (_.msg.headOption)
   }
   
-  private def performBisect(data: BisectData): Unit = {
+  // Return true if the bisect is complete
+  private def performBisect(data: BisectData): Boolean = {
     if (!data.isReady)
       throw new IllegalStateException("performBisect() called when data not ready")
 
@@ -226,10 +236,12 @@ object Bisect extends Command {
           for (rev <- maxRev +: candidateRevs)
             println(yellow(rev))
           println("We cannot bisect more!")
+          true
       }
       else {
         println(s"\nThe first '${data.termBadName}' commit is: ${yellow(maxRev)}")
         getLogEntry(maxRev, withPaths = true) foreach { log => showCommit(log) }
+        true
       }
     }
     else {
@@ -243,13 +255,8 @@ object Bisect extends Command {
       
       println(s"Bisecting: $num revisions left to test after this (roughly $steps)")
       updateWorkingCopy(nextRev)
+      false
     }
-  }
-  
-  private def bisectIsComplete(data: BisectData): Boolean = {
-    val candidateRevs  = getCandidateRevisions(data)
-    val nonSkippedRevs = candidateRevs filterNot data.skipped.contains
-    nonSkippedRevs.isEmpty
   }
   
   private def updateWorkingCopy(revision: String): Unit = {
@@ -494,36 +501,34 @@ object Bisect extends Command {
       // The new bad revision can come after the existing maxRev
       // This allows the user to recheck a range of commits.
       // The new bad revsion cannot be less than or equal to the minRev
-      val statusData = if (revision.toInt <= data.repoMin) {
+      if (revision.toInt <= data.repoMin)
         println(s"'${data.termBadName}' revision cannot be the oldest revision in the repository")
-        data
-      }
-      else if (revision.toInt == minRev) {
+      else if (revision.toInt == minRev)
         println(s"'${data.termBadName}' revision cannot be the same as the '${data.termGoodName}' revision")
-        data
-      }
-      else if (revision.toInt < minRev) {
+      else if (revision.toInt < minRev)
         println(s"'${data.termBadName}' revision cannot be older than the '${data.termGoodName}' revision")
-        data
-      }
       else {
-        //  If this revision was previously skipped, it is no longer skipped
-        val newData = data.copy(maxRev = Some(revision), skipped = data.skipped - revision)
-        saveBisectData(newData)
-        
-        logBisectRevision(revision, data.termBadName)
-        
-        if (newData.isReady)
-          performBisect(newData)
-    
+        markBadRevision(revision)
         logBisectCommand(data.termBadName +: args)
-        newData
       }
       
-      getWaitingStatus(statusData) foreach { status =>
+      getWaitingStatus(getBisectData()) foreach { status =>
         appendToBisectLog(s"# $status")
         println(status)
       }          
+    }
+    
+    //  Returns true if the performBisect() reports that the session is complete
+    def markBadRevision(revision: String): Boolean = {
+      val data = getBisectData()
+      //  If this revision was previously skipped, it is no longer skipped
+      val newData = data.copy(maxRev = Some(revision), skipped = data.skipped - revision)
+      saveBisectData(newData)
+      logBisectRevision(revision, data.termBadName)
+      if (newData.isReady)
+        performBisect(newData)
+      else
+        false
     }
   }
   
@@ -564,36 +569,34 @@ object Bisect extends Command {
       // The new good revision can come before the exisiing minRev
       // This allow the user to recheck a range of commits.
       // The new good revsion cannot be greater than or equal to the maxRev
-      val statusData = if (revision.toInt >= data.repoMax) {
+      val statusData = if (revision.toInt >= data.repoMax)
         println(s"'${data.termGoodName}' revision cannot be the newest revision in the repository")
-        data
-      }
-      else if (revision.toInt == maxRev) {
+      else if (revision.toInt == maxRev)
         println(s"'${data.termGoodName}' revision cannot be the same as the '${data.termBadName}' revision")
-        data
-      }
-      else if (revision.toInt > maxRev) {
+      else if (revision.toInt > maxRev)
         println(s"'${data.termGoodName}' revision cannot be newer than the '${data.termBadName}' revision")
-        data
-      }
       else {
-        //  If this revision was previously skipped, it is no longer skipped
-        val newData = data.copy(minRev = Some(revision), skipped = data.skipped - revision)
-        saveBisectData(newData)
-        
-        logBisectRevision(revision, data.termGoodName)
-        
-        if (newData.isReady)
-          performBisect(newData)
-    
+        markGoodRevision(revision)
         logBisectCommand(data.termGoodName +: args)
-        newData
       }
       
-      getWaitingStatus(statusData) foreach { status =>
+      getWaitingStatus(getBisectData()) foreach { status =>
         appendToBisectLog(s"# $status")
         println(status)
       }          
+    }
+    
+    //  Returns true if the performBisect() reports that the session is complete
+    def markGoodRevision(revision: String): Boolean = {
+      val data = getBisectData()
+      //  If this revision was previously skipped, it is no longer skipped
+      val newData = data.copy(minRev = Some(revision), skipped = data.skipped - revision)
+      saveBisectData(newData)
+      logBisectRevision(revision, data.termGoodName)
+      if (newData.isReady)
+        performBisect(newData)
+      else
+        false
     }
   }
   
@@ -689,29 +692,36 @@ object Bisect extends Command {
 
     
     override def run(args: Seq[String]): Unit = {
-      val options    = processCommandLine(args)
-      val data       = getBisectData()
-      val incoming   = if (options.ranges.nonEmpty) rangesToSet(options.ranges) else Set(getWorkingCopyInfo().commitRev)
-      val newSkipped = (incoming -- data.skipped).toSeq.sortWith(_.toInt > _.toInt)
-      
-      val statusData = if (newSkipped.nonEmpty) {
-        val newData = data.copy(skipped = data.skipped ++ incoming)
-        saveBisectData(newData)
-        newSkipped foreach (logBisectRevision(_, "skip"))
+      val options   = processCommandLine(args)
+      val data      = getBisectData()
+      val revisions = if (options.ranges.nonEmpty) rangesToSet(options.ranges) else Set(getWorkingCopyInfo().commitRev)
         
-        if (newData.isReady)
-          performBisect(newData)
-  
-        logBisectCommand(cmdName +: args)
-        newData
-      }
-      else
-        data
-    
-      getWaitingStatus(statusData) foreach { status =>
+      markSkippedRevisions(revisions)
+      logBisectCommand(cmdName +: args)
+      
+      getWaitingStatus(getBisectData()) foreach { status =>
         appendToBisectLog(s"# $status")
         println(status)
       }          
+    }
+    
+    
+    //  Returns true if the performBisect() reports that the session is complete
+    def markSkippedRevisions(skipRevisions: Set[String]): Boolean = {
+      val data = getBisectData()
+      val newSkipped = (skipRevisions -- data.skipped).toSeq sorted RevisionOrdering
+      
+      if (newSkipped.nonEmpty) {
+        val newData = data.copy(skipped = data.skipped ++ skipRevisions)
+        saveBisectData(newData)
+        newSkipped foreach (logBisectRevision(_, cmdName))
+        if (newData.isReady)
+          performBisect(newData)
+        else
+          false
+      }
+      else
+        false
     }
   }
   
@@ -746,12 +756,12 @@ object Bisect extends Command {
       val options      = processCommandLine(args)
       val data         = getBisectData()
       val incoming     = if (options.ranges.nonEmpty) rangesToSet(options.ranges) else Set(getWorkingCopyInfo().commitRev)
-      val newUnskipped = (incoming intersect data.skipped).toSeq.sortWith(_.toInt > _.toInt)
+      val newUnskipped = (incoming intersect data.skipped).toSeq sorted RevisionOrdering
       
       val statusData = if (newUnskipped.nonEmpty) {
         val newData = data.copy(skipped = data.skipped -- incoming)
         saveBisectData(newData)
-        newUnskipped foreach (logBisectRevision(_, "unskip"))
+        newUnskipped foreach (logBisectRevision(_, cmdName))
         
         if (newData.isReady)
           performBisect(newData)
@@ -774,17 +784,23 @@ object Bisect extends Command {
     override val cmdName = "run"
     val cmdPrefix = s"$scriptName $name $cmdName"
 
-    private def processCommandLine(args: Seq[String]): Unit = {
+    case class Options(cmdArgs: Seq[String] = Seq.empty)
+    
+    private def processCommandLine(args: Seq[String]): Options = {
 
-      val parser = new OptionParser[Int] {
+      val parser = new OptionParser[Options] {
         
         banner = s"usage: $cmdPrefix <cmd> [<arg>...]"
 
         flag("-h", "--help", "Show this message")
             { _ => println(help); throw HelpException() }
+            
+        arg[String] { (cmdArg, options) => 
+          options.copy(cmdArgs = options.cmdArgs :+ cmdArg)
+        }
       }
 
-      parser.parse(args, 0)
+      parser.parse(args, Options())
     }
 
     //  Run the supplied command continuously until we reach
@@ -798,9 +814,11 @@ object Bisect extends Command {
     //  128 - 255              The bisect session should be aborted
      
     override def run(args: Seq[String]): Unit = {
-      //  See if we should display help
-      processCommandLine(if (args.isEmpty) Seq("--help") else args)
+      val options = processCommandLine(if (args.isEmpty) Seq("--help") else args)
       val initialData = getBisectData()
+
+      if (options.cmdArgs.isEmpty)
+        generalError("You must specify a command to run")
       
       getWaitingStatus(initialData) foreach println
       
@@ -810,16 +828,31 @@ object Bisect extends Command {
       def runCommand(): Unit = {
         val data = getBisectData()  // Get fresh data
 
-        if (bisectIsComplete(data))
-          successExit(s"$cmdPrefix: bisect is complete")
-        
-        exec(args, None, new ConsoleExecLogger) match {
-          case 0            => Good.run(Nil)
-          case 125          => Skip.run(Nil)
-          case r if r < 128 => Bad.run(Nil)
-          case r            => generalError(s"$cmdPrefix: failed.  Command '${args.head}' returned unrecoverable error code ($r)")
+        println(options.cmdArgs mkString " ")
+        val finished = exec(options.cmdArgs, None, new ConsoleExecLogger) match {
+          case 0 =>
+            displayBisectCommand(Seq(data.termGoodName))
+            val complete = Good.markGoodRevision(getWorkingCopyInfo().commitRev)
+            logBisectCommand(Seq(data.termGoodName))
+            complete
+            
+          case 125 =>
+            displayBisectCommand(Seq(Skip.cmdName))
+            val complete = Skip.markSkippedRevisions(Set(getWorkingCopyInfo().commitRev))
+            logBisectCommand(Seq(Skip.cmdName))
+            complete
+          
+          case r if r < 128 =>
+            displayBisectCommand(Seq(data.termBadName))
+            val complete = Bad.markBadRevision(getWorkingCopyInfo().commitRev)
+            logBisectCommand(Seq(data.termBadName))
+            complete
+            
+          case r => generalError(s"$cmdPrefix: failed.  Command '${options.cmdArgs.head}' returned unrecoverable error code ($r)")
         }
-        runCommand()
+        
+        if (!finished)
+          runCommand()
       }
 
       // Start it off
