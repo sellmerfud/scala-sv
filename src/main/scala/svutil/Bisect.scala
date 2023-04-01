@@ -182,6 +182,7 @@ object Bisect extends Command {
     
     val maxRev  = data.maxRev getOrElse data.repoMax.toString
     val minRev  = data.minRev getOrElse data.repoMin.toString
+    println(s"Fetching history from ${yellow(minRev)} to ${yellow(maxRev)}")
     val revList = getRevisionRange(maxRev, minRev)
     
     revList drop 1 dropRight 1 // Remove the endpoints - maxRev and minRev
