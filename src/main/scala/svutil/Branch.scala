@@ -81,29 +81,36 @@ object Branch extends Command {
       println(header)
       println("--------------------")
       
+      val x = getSvnLists(url)
       getSvnLists(url).head.entries filter acceptable foreach { entry =>
         println(green(entry.name))
       }
     }
     
+    val baseMatch = """(.*)/(?:trunk|branches|tags)/.*""".r
+    val baseUrl = getSvnInfo(options.path).url match {
+        case baseMatch(base) => base
+        case _               => generalError(s"Cannot find the '$name' directory for the repository")
+      }
     
-    val rootUrl = getSvnInfo(options.path).rootUrl
+        
     if (options.listBranches)
-      listEntries("Branches", s"$rootUrl/branches", options.branches)
+      listEntries("Branches", s"$baseUrl/branches", options.branches)
+    
     if (options.listTags)
-      listEntries("Tags", s"$rootUrl/tags", options.tags)
+      listEntries("Tags", s"$baseUrl/tags", options.tags)
   }
   
   private def showCurrentBranch(options: Options): Unit = {
 
     val info = getSvnInfo(options.path)
-    val TRUNK  = """\^/trunk.*""".r
-    val BRANCH = """\^/branches/([^/]+).*""".r
-    val TAG    = """\^/tags/([^/]+).*""".r
+    val TRUNK  = """\^.*/trunk.*""".r
+    val BRANCH = """\^.*/branches/([^/]+).*""".r
+    val TAG    = """\^.*/tags/([^/]+).*""".r
     // Parse the XML log entries
     val branch = info.relativeUrl match {
       case TRUNK()      => "trunk"
-      case BRANCH(name) => name
+      case BRANCH(name) => s"branch:$name"
       case TAG(name)    => s"tag:$name"
       case _            => "cannot be determined"
     }
