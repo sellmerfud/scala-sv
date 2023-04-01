@@ -1017,8 +1017,8 @@ object Bisect extends Command {
         
         banner = s"usage: $cmdPrefix [<options>] [<revision>]"
 
-        bool("", "--update",    "Update working copy.  (Default is yes)")
-          { (value, options) => options.copy(update = value) }
+        flag("", "--no-update",    "Do not update working copy")
+          { _.copy(update = false) }
           
         flag("-h", "--help", "Show this message")
             { _ => println(help); throw HelpException() }
