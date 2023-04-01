@@ -264,9 +264,10 @@ object Bisect extends Command {
     }
   }
   
-  private def getLogEntry(revision: String, withPaths: Boolean = false): Option[LogEntry] = {
+  private def getLogEntry(revision: String, withPaths: Boolean = false, stopOnCopy: Boolean = true): Option[LogEntry] = {
     val verbose  = if (withPaths) Seq("--verbose") else Seq.empty
-    val cmdLine  = Seq("svn", "log", "--xml", "--stop-on-copy", s"--revision=$revision", "--limit=1", ".") ++ verbose
+    val stopArg  = if (stopOnCopy) Seq("--stop-on-copy") else Seq.empty
+    val cmdLine  = Seq("svn", "log", "--xml", s"--revision=$revision", "--limit=1", ".") ++ verbose ++ stopArg
     val logXML   = XML.loadString(runCmd(cmdLine).mkString("\n"))
     (logXML \ "logentry").headOption map parseLogEntry
   }
@@ -473,7 +474,7 @@ object Bisect extends Command {
           //  To optimize this a bit, we get the oldest revision accessible
           //  and the newest (HEAD) and store them in the bisect data.
         
-          val repoMin = getLogEntry("0:HEAD") map (_.revision.toInt) getOrElse {
+          val repoMin = getLogEntry("0:HEAD", stopOnCopy = false) map (_.revision.toInt) getOrElse {
             generalError("Cannot determine earliest repo revision for the working copy!")
           }
           val repoMax = getLogEntry("HEAD:0") map (_.revision.toInt) getOrElse {
