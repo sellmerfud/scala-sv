@@ -23,23 +23,51 @@ object Bisect extends Command {
   // Ordering for a sequence of revisions
   // We sort them from High (most recent) to Low(least recent)
   val RevisionOrdering: Ordering[String] = Ordering.by { revision => -revision.toInt }
+
+  case class ExtantEntry(revision: String, msg1st: String)
   
   private case class BisectData(
-    repoMin:     Int,
-    repoMax:     Int,
     localPath:   String,
-    originalRev: String,                      // original working copy revision. Used to reset working copy
-    maxRev:      Option[String] = None,       // maximum revision number in our list that is still being checked
-    minRev:      Option[String] = None,       // minimum revision number in our list that is still being checked
-    skipped:     Set[String]    = Set.empty,  // revisions that have been explicitly skipped
-    termBad:     Option[String] = None,
-    termGood:    Option[String] = None,
+    originalRev: String,                        // original working copy revision. Used to reset working copy
+    startMaxRev: Option[String]   = None,       // Initial starting max, used to get extant revs
+    startMinRev: Option[String]   = None,       // Initial starting min, used to get extant revs
+    maxRev:      Option[String]   = None,       // maximum revision number in our list that is still being checked
+    minRev:      Option[String]   = None,       // minimum revision number in our list that is still being checked
+    extantRevs:  Seq[ExtantEntry] = Seq.empty,  // revisons between the original bad and good (inclusive)
+    skipped:     Set[String]      = Set.empty,  // revisions that have been explicitly skipped
+    termBad:     Option[String]   = None,
+    termGood:    Option[String]   = None,
   ) {
     val termBadName  = termBad  getOrElse Bad.cmdName
     val termGoodName = termGood getOrElse Good.cmdName
     
-    val isReady = maxRev.nonEmpty && minRev.nonEmpty
+    val isReady = startMaxRev.nonEmpty && startMinRev.nonEmpty
+    
+    //  List of revisions between maxRev and minRev (exclusive)
+    def getCandidateRevisions() = {
+      if (!isReady)
+        throw new IllegalStateException("getCandidateRevisions() called when data not ready")
+      val lowIndex = extantRevs indexWhere (_.revision == maxRev.get)
+      val hiIndex  = extantRevs indexWhere (_.revision == minRev.get)
+      extantRevs.slice(lowIndex + 1, hiIndex)
+    }
+    
+    def getExtant(revision: String) = extantRevs find (_.revision == revision)
+    def isExtant(revision: String)  = extantRevs exists (_.revision == revision)
+    def getLogMsg(revision: String) = extantRevs find (_.revision == revision) map (_.msg1st) getOrElse ""
   }
+  
+  //  Try to limit the revs to only those in the cadidate list
+  //  If the data is not ready then just return the whole set
+  def candidatesOnly(data: BisectData, revisions: Set[String]): Set[String] = {
+    if (data.isReady) {
+      val candidates = (data.getCandidateRevisions() map (_.revision)).toSet
+      revisions filter candidates.contains
+    }
+    else
+      revisions
+  }
+  
   
   implicit class ConfigWrapper(cfg: Config) {
     def optString(path: String): Option[String] = if (cfg.getIsNull(path)) None else Some(cfg.getString(path))
@@ -47,30 +75,43 @@ object Bisect extends Command {
     
   //  Convert our BisectData to a Config value that can be saved to disk.
   private def toConfigObject(data: BisectData): ConfigObject = {
+    
+    def toExtantConfig(entry: ExtantEntry): ConfigValue = {
+      ConfigValueFactory.fromMap(Map("revision" -> entry.revision, "msg1st" -> entry.msg1st).asJava)
+    }
+    
     ConfigValueFactory.fromMap(Map(
-      "repoMin"     -> data.repoMin,
-      "repoMax"     -> data.repoMax,
       "localPath"   -> data.localPath,
       "originalRev" -> data.originalRev,
+      "startMaxRev" -> data.startMaxRev.getOrElse(null),
+      "startMinRev" -> data.startMinRev.getOrElse(null),
       "maxRev"      -> data.maxRev.getOrElse(null),
       "minRev"      -> data.minRev.getOrElse(null),
+      "extantRevs"  -> ConfigValueFactory.fromIterable(data.extantRevs.map(toExtantConfig).asJava),
       "skipped"     -> ConfigValueFactory.fromIterable(data.skipped.asJava),
       "termBad"     -> data.termBad.getOrElse(null),
       "termGood"    -> data.termGood.getOrElse(null),
     ).asJava)
   }
   
-  private def fromConfig(cfg: Config) = BisectData(
-    cfg.getInt("repoMin"),
-    cfg.getInt("repoMax"),
-    cfg.getString("localPath"),
-    cfg.getString("originalRev"),
-    cfg.optString("maxRev"),
-    cfg.optString("minRev"),
-    cfg.getStringList("skipped").asScala.toSet,
-    cfg.optString("termBad"),
-    cfg.optString("termGood"),
-  )
+  private def fromConfig(cfg: Config) = {
+    def toExtantEntry(cfg: Config): ExtantEntry = {
+      ExtantEntry(cfg.getString("revision"), cfg.getString("msg1st"))
+    }
+    
+    BisectData(
+      cfg.getString("localPath"),
+      cfg.getString("originalRev"),
+      cfg.optString("startMaxRev"),
+      cfg.optString("startMinRev"),
+      cfg.optString("maxRev"),
+      cfg.optString("minRev"),
+      cfg.getConfigList("extantRevs").asScala.toSeq map toExtantEntry,
+      cfg.getStringList("skipped").asScala.toSet,
+      cfg.optString("termBad"),
+      cfg.optString("termGood"),
+    )
+  }
 
   private def findSvnDir(): File = {
     def findIt(directory: Path): File = {
@@ -213,8 +254,7 @@ object Bisect extends Command {
     }
   }
   
-  private def logBisectRevision(revision: String, term: String): Unit = {
-    val msg1st = get1stLogMessage(revision) getOrElse ""
+  private def logBisectRevision(revision: String, term: String, msg1st: String): Unit = {
     appendToBisectLog(s"# $term: [$revision] $msg1st")
   }
   
@@ -230,29 +270,15 @@ object Bisect extends Command {
 
   // Sort them because the range can start with either the high or low end
   // and we alwasys work with ranges sorted form high to low (most recent revs first)
-  private def getRevisionRange(rev1: String, rev2: String): Seq[String] = {
-    val logXML = XML.loadString(runCmd(Seq("svn", "log", "--xml", "--quiet", s"--revision=$rev1:$rev2", ".")).mkString("\n"))
-    (logXML \ "logentry") map (parseLogEntry(_).revision)
+  private def getExtantRevisions(rev1: String, rev2: String): Seq[ExtantEntry] = {
+    println(s"Fetching history from ${yellow(rev1)} to ${yellow(rev2)}")
+    val logXML = XML.loadString(runCmd(Seq("svn", "log", "--xml", s"--revision=$rev1:$rev2", ".")).mkString("\n"))
+    (logXML \ "logentry") map { node =>
+      val entry = parseLogEntry(node)
+      ExtantEntry(entry.revision, entry.msg.headOption getOrElse "")
+    }
   }
   
-  //  Return the list of all revisions for the current working copy directory
-  private def getAllRevisions(data: BisectData) = getRevisionRange("HEAD", "0")
-  
-  //  Get the list of log revisions for the working copy that are
-  //  between maxRev and minRev exclusively
-  //  The most recent revision will be at the head of the list.
-  private def getCandidateRevisions(data: BisectData): Seq[String] = {
-    if (!data.isReady)
-      throw new IllegalStateException("getCandidateRevisions() called when data not ready")
-    
-    val maxRev  = data.maxRev getOrElse data.repoMax.toString
-    val minRev  = data.minRev getOrElse data.repoMin.toString
-    println(s"Fetching history from ${yellow(minRev)} to ${yellow(maxRev)}")
-    val revList = getRevisionRange(maxRev, minRev)
-    
-    revList drop 1 dropRight 1 // Remove the endpoints - maxRev and minRev
-  }
-    
   private def getWaitingStatus(data: BisectData): Option[String] = {
     val bad  = data.termBadName
     val good = data.termGoodName
@@ -264,16 +290,12 @@ object Bisect extends Command {
     }
   }
   
-  private def getLogEntry(revision: String, withPaths: Boolean = false, stopOnCopy: Boolean = true): Option[LogEntry] = {
+  private def getLogEntry(revision: String, withPaths: Boolean = false, stopOnCopy: Boolean = false): Option[LogEntry] = {
     val verbose  = if (withPaths) Seq("--verbose") else Seq.empty
     val stopArg  = if (stopOnCopy) Seq("--stop-on-copy") else Seq.empty
     val cmdLine  = Seq("svn", "log", "--xml", s"--revision=$revision", "--limit=1", ".") ++ verbose ++ stopArg
     val logXML   = XML.loadString(runCmd(cmdLine).mkString("\n"))
     (logXML \ "logentry").headOption map parseLogEntry
-  }
-  
-  private def get1stLogMessage(revision: String): Option[String] = {
-    getLogEntry(revision) flatMap (_.msg.headOption)
   }
   
   // Return true if the bisect is complete
@@ -283,15 +305,16 @@ object Bisect extends Command {
 
     val maxRev = data.maxRev.get
     val minRev = data.minRev.get
-    val candidateRevs  = getCandidateRevisions(data)
-    val nonSkippedRevs = candidateRevs filterNot data.skipped.contains
+    val candidateRevs  = data.getCandidateRevisions()
+    val nonSkippedRevs = candidateRevs filterNot (r => data.skipped.contains(r.revision))
     
     if (nonSkippedRevs.isEmpty) {
       if (candidateRevs.nonEmpty) {
+          val maxEntry = data.getExtant(maxRev).get
           println("\nThere are only skipped revisions left to test.")
           println(s"The first '${data.termBadName}' commit could be any of:")
-          for (rev <- maxRev +: candidateRevs)
-            println(yellow(rev))
+          for (entry <- (maxEntry +: candidateRevs))
+            s"${println(yellow(entry.revision))} ${entry.msg1st}"
           println("We cannot bisect more!")
           true
       }
@@ -311,19 +334,26 @@ object Bisect extends Command {
       val nextRev = nonSkippedRevs(nonSkippedRevs.size / 2)
       
       println(s"Bisecting: $num revisions left to test after this (roughly $steps)")
-      updateWorkingCopy(nextRev)
+      updateWorkingCopy(nextRev.revision, Some(data))
       false
     }
   }
   
-  private def updateWorkingCopy(revision: String): Unit = {
-    val msg1st  = get1stLogMessage(revision) getOrElse ""
-    if (revision != getWorkingCopyInfo().commitRev) {
-      println(s"Updating working copy: [${yellow(revision)}] $msg1st")      
-      runCmd(Seq("svn", "update", s"--revision=$revision"))
+  private def get1stLogMessage(revision: String, data: Option[BisectData]): String = {
+    data match {
+      case Some(d) if d.isReady && d.isExtant(revision) =>
+        d.getLogMsg(revision)
+        
+      case _ =>
+        getLogEntry(revision) flatMap (_.msg.headOption) getOrElse ""
     }
-    else 
-      println(s"Working copy: [${yellow(revision)}] $msg1st")      
+  }
+  
+  private def updateWorkingCopy(revision: String, data: Option[BisectData] = None): Unit = {
+    val msg1st = get1stLogMessage(revision, data)
+
+    println(s"Updating working copy: [${yellow(revision)}] $msg1st")      
+    runCmd(Seq("svn", "update", s"--revision=$revision"))
   }
     
 
@@ -334,12 +364,15 @@ object Bisect extends Command {
   //  For HEAD, BASE, COMMITTED, PREV we have to specify a range and limit
   //  in order for subversion to return the log entry.
   private def resolveWorkingCopyRevision(rev: String): Option[Int] = {
-    if (rev.isInteger)
-      Some(rev.toInt)
+    if (rev.isInteger) {
+      Try(getSvnInfo(".", Some(rev)).commitRev) match {
+        case Success(rev) => Some(rev.toInt)
+        case Failure(_)   => None
+      }
+    }
     else {
       val cmdLine = Seq("svn", "log", "--xml", "--quiet", s"--revision=$rev:0", "--limit=1")
-      val logNodes = Try(XML.loadString(runCmd(cmdLine).mkString("\n")) \ "logentry")
-      logNodes match {
+      Try(XML.loadString(runCmd(cmdLine).mkString("\n")) \ "logentry") match {
         case Success(nodes) if nodes.size == 0 => None
         case Success(nodes)                    => Some(parseLogEntry(nodes.head).revision.toInt)
         case Failure(_)                        => None
@@ -350,8 +383,8 @@ object Bisect extends Command {
   
   // Argument Types with associated argument parsers
   // ========================================================
-  private case class RevisionArg(rev: String)
-  
+  private case class RevisionArg(rev: String)     // Must be a valid revison in the working copy history
+    
   private val revisionArgParser = (arg: String) => {
     val validRev = """^(?:\d+|HEAD|BASE|PREV|COMMITTED)$""".r
     if (!(validRev matches arg))
@@ -431,13 +464,13 @@ object Bisect extends Command {
         
         banner = s"usage: $cmdPrefix [<options]"
 
-        reqd[RevisionArg]("", "--bad=<revision>",    "Specify the earliest revision that contains the bug")
+        reqd[RevisionArg]("", "--bad=<revision>",    "The earliest revision that contains the bug")
           { (revision, options) => options.copy(bad = Some(revision.rev)) }
-        reqd[RevisionArg]("", "--good=<revision>",   "Specify the latest revision that does not contain the bug")
+        reqd[RevisionArg]("", "--good=<revision>",   "The latest revision that does not contain the bug")
         { (revision, options) => options.copy(good = Some(revision.rev)) }
-        reqd[TermName]("", "--term-bad=<term>",   "Specify an alternate name name for the 'bad' subcommand")
+        reqd[TermName]("", "--term-bad=<term>",   "An alternate name for the 'bad' subcommand")
         { (term, options) => options.copy(termBad = Some(term.name)) }
-        reqd[TermName]("", "--term-good=<term>",  "Specify an alternate name name for the 'good' subcommand")
+        reqd[TermName]("", "--term-good=<term>",  "An alternate name for the 'good' subcommand")
         { (term, options) => options.copy(termGood = Some(term.name)) }
         
         flag("-h", "--help", "Show this message")
@@ -468,22 +501,7 @@ object Bisect extends Command {
           generalError(s"Type '$scriptName $name ${Reset.cmdName} --help' for more information")
           
         case None =>
-          //  For very large repositories it can be slow to list all of the
-          //  history each time to validate whether a revision exists in the
-          //  working copy for the repo.
-          //  To optimize this a bit, we get the oldest revision accessible
-          //  and the newest (HEAD) and store them in the bisect data.
-        
-          val repoMin = getLogEntry("0:HEAD", stopOnCopy = false) map (_.revision.toInt) getOrElse {
-            generalError("Cannot determine earliest repo revision for the working copy!")
-          }
-          val repoMax = getLogEntry("HEAD:0") map (_.revision.toInt) getOrElse {
-            generalError("Cannot determine latest repo revision for the working copy!")
-          }
-          val badRev  = options.bad  map (x => x.toInt min repoMax)
-          val goodRev = options.good map (x => x.toInt max repoMin)
-          
-          (badRev, goodRev) match {
+          (options.bad map (_.toInt), options.good map (_.toInt)) match {
             case (Some(bad), Some(good)) if bad == good =>
               generalError("The 'bad' and 'good' revisions cannot be the same")
               
@@ -493,19 +511,22 @@ object Bisect extends Command {
             case _ =>
           }
           
-          //  Determine the oldest rev in the rository.
-          //  For very large repos this can take some time so we cache the value
-          //  
+          // If we have both bad and good then get the revisions between the two
+          val badAndGood = (options.bad zip options.good).headOption
+          val extantRevs = badAndGood map { case (bad, good) => getExtantRevisions(bad, good) } getOrElse Seq.empty
+          
           // save the bisect data in order to start a new session.
           val data = BisectData(
-            repoMin     = repoMin,
-            repoMax     = repoMax,
             localPath   = cwd.toString,
             originalRev = getWorkingCopyInfo().commitRev,
-            maxRev      = badRev map (_.toString),
-            minRev      = goodRev map (_.toString),
+            maxRev      = options.bad,
+            minRev      = options.good,
+            startMaxRev = options.bad,
+            startMinRev = options.good,
+            extantRevs  = extantRevs,
             termBad     = options.termBad,
             termGood    = options.termGood)
+            
           saveBisectData(data)
           bisectLogFile.delete()  // Remove any previous log file.
 
@@ -513,8 +534,8 @@ object Bisect extends Command {
           appendToBisectLog(s"# $scriptName $name log file  ${displayDateTime(LocalDateTime.now)}")
           appendToBisectLog(s"# Initiated from: $cwd")
           appendToBisectLog(s"# ----------------------------")
-          data.maxRev foreach (logBisectRevision(_, data.termBadName))
-          data.minRev foreach (logBisectRevision(_, data.termGoodName))
+          data.maxRev foreach (r => logBisectRevision(r, data.termBadName, get1stLogMessage(r, Some(data))))
+          data.minRev foreach (r => logBisectRevision(r, data.termGoodName, get1stLogMessage(r, Some(data))))
           getWaitingStatus(data) foreach { status =>
             appendToBisectLog(s"# $status")
             println(status)
@@ -557,19 +578,19 @@ object Bisect extends Command {
     }
     
     override def run(args: Seq[String]): Unit = {
-      val data     = getBisectData()
-      val options  = processCommandLine(args, data.termBadName)
-      val fixedRev = options.revision map (r => (r.toInt min data.repoMax).toString)
-      val revision = fixedRev getOrElse getWorkingCopyInfo().commitRev
-      val minRev   = data.minRev map (_.toInt) getOrElse -1
+      val data        = getBisectData()
+      val options     = processCommandLine(args, data.termBadName)
+      val revision    = options.revision getOrElse getWorkingCopyInfo().commitRev
+      val minRev      = data.minRev map (_.toInt) getOrElse -1
+      val startMaxRev = data.startMaxRev map (_.toInt) getOrElse Int.MaxValue
       
       // The new bad revision can come after the existing maxRev
       // This allows the user to recheck a range of commits.
-      // The new bad revsion cannot be less than or equal to the minRev
-      if (revision.toInt <= data.repoMin)
-        println(s"'${data.termBadName}' revision cannot be the oldest revision in the repository")
-      else if (revision.toInt <= minRev)
+      // The new bad revision cannot be less than or equal to the minRev
+      if (revision.toInt <= minRev)
         println(s"'${data.termBadName}' revision must be more recent than the '${data.termGoodName}' revision")
+      else if (revision.toInt > startMaxRev)
+        println(s"'${data.termBadName}' revision is out of range, cannot come after starting '${data.termBadName}' revision ($startMaxRev)")
       else {
         markBadRevision(revision)
         logBisectCommand(data.termBadName +: args)
@@ -582,12 +603,27 @@ object Bisect extends Command {
     }
     
     //  Returns true if the performBisect() reports that the session is complete
+    //  If this revision was previously skipped, it is no longer skipped
     def markBadRevision(revision: String): Boolean = {
-      val data = getBisectData()
-      //  If this revision was previously skipped, it is no longer skipped
-      val newData = data.copy(maxRev = Some(revision), skipped = data.skipped - revision)
+      val data    = getBisectData()
+      val newData = if (data.isReady)
+        data.copy(maxRev = Some(revision), skipped = data.skipped - revision)
+      else {
+        val startMaxRev = data.startMaxRev getOrElse revision
+        val extantRevs = if (data.startMinRev.isDefined)
+          getExtantRevisions(revision, data.startMinRev.get)
+        else
+          data.extantRevs
+
+        data.copy(
+          maxRev      = Some(revision),
+          startMaxRev = Some(revision),
+          skipped     = data.skipped - revision,
+          extantRevs  = extantRevs)
+      }
+      
       saveBisectData(newData)
-      logBisectRevision(revision, data.termBadName)
+      logBisectRevision(revision, newData.termBadName, get1stLogMessage(revision, Some(newData)))
       if (newData.isReady)
         performBisect(newData)
       else
@@ -624,19 +660,19 @@ object Bisect extends Command {
     }
     
     override def run(args: Seq[String]): Unit = {
-      val data     = getBisectData()
-      val options  = processCommandLine(args, data.termGoodName)
-      val fixedRev = options.revision map (r => (r.toInt max data.repoMin).toString)
-      val revision = fixedRev getOrElse getWorkingCopyInfo().commitRev
-      val maxRev   = data.maxRev map (_.toInt) getOrElse Int.MaxValue
-      
+      val data        = getBisectData()
+      val options     = processCommandLine(args, data.termGoodName)
+      val revision    = options.revision getOrElse getWorkingCopyInfo().commitRev
+      val maxRev      = data.maxRev map (_.toInt) getOrElse Int.MaxValue
+      val startMinRev = data.startMinRev map (_.toInt) getOrElse -1
+
       // The new good revision can come before the exisiing minRev
       // This allow the user to recheck a range of commits.
-      // The new good revsion cannot be greater than or equal to the maxRev
-      val statusData = if (revision.toInt >= data.repoMax)
-        println(s"'${data.termGoodName}' revision cannot be the newest revision in the repository")
-      else if (revision.toInt >= maxRev)
+      // The new good revision cannot be greater than or equal to the maxRev
+      if (revision.toInt >= maxRev)
         println(s"'${data.termGoodName}' revision must be older than the '${data.termBadName}' revision")
+      else if (revision.toInt < startMinRev)
+        println(s"'${data.termGoodName}' revision is out of range, cannot come before starting '${data.termGoodName}' revision ($startMinRev)")
       else {
         markGoodRevision(revision)
         logBisectCommand(data.termGoodName +: args)
@@ -649,12 +685,27 @@ object Bisect extends Command {
     }
     
     //  Returns true if the performBisect() reports that the session is complete
+    //  If this revision was previously skipped, it is no longer skipped
     def markGoodRevision(revision: String): Boolean = {
-      val data = getBisectData()
-      //  If this revision was previously skipped, it is no longer skipped
-      val newData = data.copy(minRev = Some(revision), skipped = data.skipped - revision)
+      val data    = getBisectData()
+      val newData = if (data.isReady)
+        data.copy(minRev = Some(revision), skipped = data.skipped - revision)
+      else {
+        val startMinRev = data.startMinRev getOrElse revision
+        val extantRevs  = if (data.startMaxRev.isDefined)
+          getExtantRevisions(data.startMaxRev.get, revision)
+        else
+          data.extantRevs
+        
+        data.copy(
+          minRev      = Some(revision),
+          startMinRev = Some(revision),
+          skipped     = data.skipped - revision,
+          extantRevs  = extantRevs)
+      }
+
       saveBisectData(newData)
-      logBisectRevision(revision, data.termGoodName)
+      logBisectRevision(revision, newData.termGoodName, get1stLogMessage(revision, Some(newData)))
       if (newData.isReady)
         performBisect(newData)
       else
@@ -738,7 +789,7 @@ object Bisect extends Command {
         
         addArgumentParser(revisionRangeArgParser)
         
-        banner = s"usage: $cmdPrefix [<revision>|<revsion>:<revision>]..."
+        banner = s"usage: $cmdPrefix [<revision>|<revision>:<revision>]..."
 
         flag("-h", "--help", "Show this message")
             { _ => println(help); throw HelpException() }
@@ -767,16 +818,17 @@ object Bisect extends Command {
       }          
     }
     
-    
+
     //  Returns true if the performBisect() reports that the session is complete
     def markSkippedRevisions(skipRevisions: Set[String]): Boolean = {
-      val data = getBisectData()
-      val newSkipped = (skipRevisions -- data.skipped).toSeq sorted RevisionOrdering
+      val data       = getBisectData()
+      val incoming   = candidatesOnly(data, skipRevisions)
+      val newSkipped = (incoming -- data.skipped).toSeq sorted RevisionOrdering
       
       if (newSkipped.nonEmpty) {
-        val newData = data.copy(skipped = data.skipped ++ skipRevisions)
+        val newData = data.copy(skipped = data.skipped ++ incoming)
         saveBisectData(newData)
-        newSkipped foreach (logBisectRevision(_, cmdName))
+        newSkipped foreach (r => logBisectRevision(r, cmdName, get1stLogMessage(r, Some(newData))))
         if (newData.isReady)
           performBisect(newData)
         else
@@ -800,7 +852,7 @@ object Bisect extends Command {
         
         addArgumentParser(revisionRangeArgParser)
         
-        banner = s"usage: $cmdPrefix [<revision>|<revsion>:<revision>]..."
+        banner = s"usage: $cmdPrefix [<revision>|<revision>:<revision>]..."
 
         flag("-h", "--help", "Show this message")
             { _ => println(help); throw HelpException() }
@@ -817,27 +869,35 @@ object Bisect extends Command {
     override def run(args: Seq[String]): Unit = {
       val options      = processCommandLine(args)
       val data         = getBisectData()
-      val incoming     = if (options.ranges.nonEmpty) rangesToSet(options.ranges) else Set(getWorkingCopyInfo().commitRev)
-      val newUnskipped = (incoming intersect data.skipped).toSeq sorted RevisionOrdering
-      
-      val statusData = if (newUnskipped.nonEmpty) {
-        val newData = data.copy(skipped = data.skipped -- incoming)
-        saveBisectData(newData)
-        newUnskipped foreach (logBisectRevision(_, cmdName))
+      val revisions    = if (options.ranges.nonEmpty) rangesToSet(options.ranges) else Set(getWorkingCopyInfo().commitRev)
         
-        if (newData.isReady)
-          performBisect(newData)
-  
-        logBisectCommand(cmdName +: args)
-        newData
-      }
-      else
-        data
-    
-      getWaitingStatus(statusData) foreach { status =>
+      markUnskippedRevision(revisions)
+      logBisectCommand(cmdName +: args)
+            
+      getWaitingStatus(getBisectData()) foreach { status =>
         appendToBisectLog(s"# $status")
         println(status)
       }          
+    }
+    
+    //  Returns true if the performBisect() reports that the session is complete
+    def markUnskippedRevision(unskipRevisions: Set[String]): Boolean = {
+      val data         = getBisectData()
+      val incoming     = candidatesOnly(data, unskipRevisions)
+      val newUnskipped = (incoming intersect data.skipped).toSeq sorted RevisionOrdering
+      
+      if (newUnskipped.nonEmpty) {
+        val newData = data.copy(skipped = data.skipped -- incoming)
+        saveBisectData(newData)
+        newUnskipped foreach (r => logBisectRevision(r, cmdName, get1stLogMessage(r, Some(newData))))
+        
+        if (newData.isReady)
+          performBisect(newData)
+        else
+          false
+      }
+      else
+        false
     }
   }
   
@@ -866,7 +926,7 @@ object Bisect extends Command {
     }
 
     //  Run the supplied command continuously until we reach
-    //  the end of the bisect session and find the target revsion
+    //  the end of the bisect session and find the target revision
     //  
     //  If the command returns:
     //  ------------------------------------------------------------
@@ -885,7 +945,7 @@ object Bisect extends Command {
       getWaitingStatus(initialData) foreach println
       
       if (!initialData.isReady)
-        generalError(s"$cmdPrefix cannot be used until a '${initialData.termGoodName}' revsion and '${initialData.termBadName}' revision have been supplied")
+        generalError(s"$cmdPrefix cannot be used until a '${initialData.termGoodName}' revision and '${initialData.termBadName}' revision have been supplied")
 
       def runCommand(): Unit = {
         val data = getBisectData()  // Get fresh data
@@ -960,11 +1020,11 @@ object Bisect extends Command {
       
       if (options.update) {
         val updateRev = options.revision getOrElse data.originalRev
-        updateWorkingCopy(updateRev)
+        updateWorkingCopy(updateRev, Some(data))
       }
       else {
         val currentRev = getWorkingCopyInfo().commitRev
-        val msg1st     = get1stLogMessage(currentRev) getOrElse ""
+        val msg1st     = get1stLogMessage(currentRev, Some(data))
         
         println(s"Working copy: [${yellow(currentRev)}] $msg1st")      
       }
