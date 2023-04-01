@@ -130,7 +130,7 @@ object Log extends Command {
       0
 
     def buildPrefix(revision: String, author: String, date: LocalDateTime): String = {
-        val revFormat    = s"%-${maxRevLen}s"
+        val revFormat    = s"%${maxRevLen}s"
         val authorFormat = s"%-${maxAuthorLen}s"
         val dateStr      = if (options.time) displayDateTime(date) else displayDate(date)
         
