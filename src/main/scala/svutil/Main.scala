@@ -37,9 +37,9 @@ object Main {
   lazy val commands = Log::Branch::Show::FileRevs::Bisect::Ignore :: Nil
   
   def showHelp(): Unit = {
-    val usage = s"""|usage: $scriptName [-v | --version]
+    val usage = s"""|usage: $scriptName <command> [<args>]
+                    |       $scriptName [-v | --version]
                     |       $scriptName [-h | --help | help]
-                    |       $scriptName <command> [<args>]
                     |
                     |The available commands are:
                     |""".stripMargin

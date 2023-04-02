@@ -87,7 +87,7 @@ object Branch extends Command {
       }
     }
     
-    val baseMatch = """(.*)/(?:trunk|branches|tags)/.*""".r
+    val baseMatch = """(.*?)/(?:trunk|branches|tags)(?:/.*)?""".r
     val baseUrl = getSvnInfo(options.path).url match {
         case baseMatch(base) => base
         case _               => generalError(s"Cannot find the '$name' directory for the repository")
