@@ -12,7 +12,7 @@ import Utilities._
 object Show extends Command {
   
   override val name = "show"
-  override val description = "Show the details of a revision"
+  override val description = "Show the details of a given revision"
   
   case class Options(
     revision:  Option[String] = None,
@@ -27,6 +27,9 @@ object Show extends Command {
     
     val parser = new OptionParser[Options] {
       banner = s"usage: $scriptName $name [<options>] [<path>|<url>]"
+      separator("")
+      separator(description)
+      separator("Options:")
       
       reqd[String]("-r", "--revision=<revision>", "Repository revision of the commit to show")
         { (rev, options) => options.copy(revision = Some(rev)) }

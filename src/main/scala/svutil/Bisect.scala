@@ -407,6 +407,9 @@ object Bisect extends Command {
         addArgumentParser(termArgParser)
         
         banner = s"usage: $cmdPrefix [<options]"
+        separator("")
+        separator("Start a bisect session in the working copy")
+        separator("Options:")        
 
         reqd[RevisionArg]("", "--bad=<revision>",    "The earliest revision that contains the bug")
           { (revision, options) => options.copy(bad = Some(revision.rev)) }
@@ -512,6 +515,9 @@ object Bisect extends Command {
         addArgumentParser(revisionArgParser)
         
         banner = s"usage: $cmdPrefix [<revision>]"
+        separator("")
+        separator("Mark a revision as bad  (It contains the bug)")
+        separator("Options:")
 
         flag("-h", "--help", "Show this message")
             { _ => println(help); throw HelpException() }
@@ -599,6 +605,9 @@ object Bisect extends Command {
         addArgumentParser(revisionArgParser)
         
         banner = s"usage: $cmdPrefix [<revision>]"
+        separator("")
+        separator("Mark a revision as good  (It does not contain the bug)")
+        separator("Options:")
 
         flag("-h", "--help", "Show this message")
             { _ => println(help); throw HelpException() }
@@ -684,6 +693,9 @@ object Bisect extends Command {
         val cmdPrefix = s"$scriptName $name $cmdName"
         
         banner = s"usage: $cmdPrefix [--term-good|--term-bad]"
+        separator("")
+        separator("Show the currently defined terms for good/bad")
+        separator("Options:")
 
         flag("", "--term-good", "Display only the term for 'good'")
           { options =>
@@ -749,6 +761,9 @@ object Bisect extends Command {
         addArgumentParser(revisionRangeArgParser)
         
         banner = s"usage: $cmdPrefix [<revision>|<revision>:<revision>]..."
+        separator("")
+        separator("Skip a revision.  It will no longer be considered")
+        separator("Options:")
 
         flag("-h", "--help", "Show this message")
             { _ => println(help); throw HelpException() }
@@ -812,6 +827,9 @@ object Bisect extends Command {
         addArgumentParser(revisionRangeArgParser)
         
         banner = s"usage: $cmdPrefix [<revision>|<revision>:<revision>]..."
+        separator("")
+        separator("Reinstate a previously skipped revision")
+        separator("Options:")
 
         flag("-h", "--help", "Show this message")
             { _ => println(help); throw HelpException() }
@@ -872,6 +890,9 @@ object Bisect extends Command {
       val parser = new OptionParser[Options] {
         
         banner = s"usage: $cmdPrefix <cmd> [<arg>...]"
+        separator("")
+        separator("Automate the bisect session by running a script")
+        separator("Options:")
 
         flag("-h", "--help", "Show this message")
             { _ => println(help); throw HelpException() }
@@ -955,6 +976,9 @@ object Bisect extends Command {
         addArgumentParser(revisionArgParser)
         
         banner = s"usage: $cmdPrefix [<options>] [<revision>]"
+        separator("")
+        separator("Clean up after a bisect session")
+        separator("Options:")
 
         flag("", "--no-update",    "Do not update working copy")
           { _.copy(update = false) }
@@ -1004,6 +1028,9 @@ object Bisect extends Command {
         val cmdPrefix = s"$scriptName $name $cmdName"
         
         banner = s"usage: $cmdPrefix [<options>]"
+        separator("")
+        separator("Show the bisect log")
+        separator("Options:")
 
         flag("-h", "--help", "Show this message")
             { _ => println(help); throw HelpException() }
@@ -1033,6 +1060,9 @@ object Bisect extends Command {
         addArgumentParser(revisionArgParser)
         
         banner = s"usage: $cmdPrefix [<options>] <log file>"
+        separator("")
+        separator("Replay the bisect session from a log file")
+        separator("Options:")
 
         flag("-h", "--help", "Show this message")
             { _ => println(help); throw HelpException() }
@@ -1072,20 +1102,19 @@ object Bisect extends Command {
   
   private def showHelp(): Nothing = {
     val sv = scriptName
-    val help = s"""|Available bisect commands:
-                   |$sv $name start       Start a bisect session in the current subversion
-                   |                      working copy directory
-                   |$sv $name bad         Mark a revision as bad  (It contains the bug)
-                   |$sv $name good        Mark a revision as good  (It does not contain the bug)
-                   |$sv $name terms       Show the currently defined terms for good/bad
-                   |$sv $name skip        Skip a revision.  It will no longer be considered
-                   |$sv $name unskip      Reinstate a previously skipped revision
-                   |$sv $name run         Automate the bisect session by running a script
-                   |                      for each tested revision 
-                   |$sv $name log         Show the bisect log
-                   |$sv $name replay      Replay the bisect session from a log file
-                   |$sv $name reset       Clean up after a bisect session returning the working
-                   |                      copy to its original revision
+    val help = s"""|$description
+                   |
+                   |Available bisect commands:
+                   |$sv $name start     Start a bisect session in the working copy
+                   |$sv $name bad       Mark a revision as bad  (It contains the bug)
+                   |$sv $name good      Mark a revision as good  (It does not contain the bug)
+                   |$sv $name terms     Show the currently defined terms for good/bad
+                   |$sv $name skip      Skip a revision.  It will no longer be considered
+                   |$sv $name unskip    Reinstate a previously skipped revision
+                   |$sv $name run       Automate the bisect session by running a script
+                   |$sv $name log       Show the bisect log
+                   |$sv $name replay    Replay the bisect session from a log file
+                   |$sv $name reset     Clean up after a bisect session
                    |
                    |Type '$sv $name <command> --help' for details on a specific command""".stripMargin
       println(help)

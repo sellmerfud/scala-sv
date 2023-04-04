@@ -21,6 +21,9 @@ object Ignore extends Command {
     
     val parser = new OptionParser[Options] {
       banner = s"usage: $scriptName $name [<options>] [<path>]"
+      separator("")
+      separator(description)
+      separator("Options:")
       
       flag("-h", "--help", "Show this message")
           { _ => println(help); sys.exit(0) }

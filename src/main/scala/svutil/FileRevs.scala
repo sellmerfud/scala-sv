@@ -34,6 +34,9 @@ object FileRevs extends Command {
       }
       
       banner = s"usage: $scriptName $name [<options>] <path> | <url>..."
+      separator("")
+      separator(description)
+      separator("Options:")
       
       reqd[Regex]("-b", "--branch=<regex>", "Specifiy branch(es) upon which to reference paths")
           { (spec, options) => options.copy(branches = options.branches :+ spec) }

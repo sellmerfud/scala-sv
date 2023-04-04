@@ -39,6 +39,9 @@ object Branch extends Command {
       }
 
       banner = s"usage: $scriptName $name [<options>] [<path> | <url>]"
+      separator("")
+      separator(description)
+      separator("Options:")
       
       optl[Regex]("-b", "--branches[=<regex>]", "Display list of branches in the repository") {
         (regex, options) => 

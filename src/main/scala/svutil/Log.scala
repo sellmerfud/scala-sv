@@ -11,7 +11,7 @@ import Utilities._
 object Log extends Command {
   
   override val name = "log"
-  override val description = "Display formatted subversion log messages"
+  override val description = "Display formatted log entries"
   case class Search(glob: String, searchAnd: Boolean)
   case class Options(
     limit:     Option[Int]    = None,
@@ -33,6 +33,9 @@ object Log extends Command {
   
     val parser = new OptionParser[Options] {
       banner = s"usage: $scriptName $name [<options>] [ <path> | <url> [<path...] ]"
+      separator("")
+      separator(description)
+      separator("Options:")
     
       reqd[Int]("-l", "--limit=<number>", "Limit the number of commits displayed") {
         (value, options) => options.copy(limit = Some(value))

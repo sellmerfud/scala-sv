@@ -691,7 +691,10 @@ object Stash extends Command {
      
   private def showHelp(): Nothing = {
     val sv = scriptName
-    val help = s"""|Available stash commands:
+    val help = s"""|Stash local changes to your working copy so that you can work on something else
+                   |and merge the changes back into your working copy at a later time.
+                   |
+                   |Available stash commands:
                    |$sv $name push    Push working copy copy to the stash and revert the working copy
                    |$sv $name pop     Remove a stash entry and apply it to the working copy
                    |$sv $name list    Display stash entries
