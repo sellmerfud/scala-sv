@@ -25,11 +25,18 @@ object Stash extends Command {
     val cmdName: String
     def run(args: Seq[String]): Unit
   }
+
+  // Values for the items in svn status
+  private val UNVERSIONED = "unversioned"
+  private val NORMAL      = "normal"
+  private val ADDED       = "added"
+  private val DELETED     = "deleted"
+  private val MODIFIED    = "modified"
   
   // path for directories wil end with a slash/  (only happens for remved directories)
   // revision of the file when it was modified (for display only)
   // status will be one of: deleted, modified, added, unversioned
-  case class StashItem(path: String, revision: String, status: String)
+  case class StashItem(path: String, revision: String, status: String, isDir: Boolean)
   
   case class StashEntry(
     branch: String,        // branch from which the stash was created (trunk, 8.1, etc.)
@@ -45,9 +52,13 @@ object Stash extends Command {
 
   private def toConfigObject(stashEntries: Seq[StashEntry]): ConfigObject = {
 
-    def itemToConfig(path: StashItem): ConfigObject =
-      ConfigValueFactory.fromMap(
-        Map("path" -> path.path,"revision" -> path.revision,"status" -> path.status).asJava)
+    def itemToConfig(item: StashItem): ConfigObject =
+      ConfigValueFactory.fromMap(Map(
+        "path" -> item.path,
+        "revision" -> item.revision,
+        "status"   -> item.status,
+        "isDir"    -> item.isDir
+      ).asJava)
     
     
     def entryToConfig(entry: StashEntry): ConfigObject =
@@ -68,7 +79,12 @@ object Stash extends Command {
   private def fromConfig(cfg: Config): List[StashEntry] = {
     
     def toStashItem(cfg: Config): StashItem = 
-      StashItem(cfg.getString("path"), cfg.getString("revision"), cfg.getString("status"))
+      StashItem(
+        cfg.getString("path"),
+        cfg.getString("revision"),
+        cfg.getString("status"),
+        cfg.getBoolean("isDir")
+      )
       
     def toStashEntry(cfg: Config): StashEntry =
       StashEntry(
@@ -127,8 +143,8 @@ object Stash extends Command {
       
     // sv stash [push] [-u|--include-unversioned] [-d|--description=<desc>]
     private case class Options(
-      includeUnversioned: Boolean        = false,
-      description:        Option[String] = None)
+      unversioned: Boolean        = false,
+      description: Option[String] = None)
         
     private def processCommandLine(args: Seq[String]): Options = {
 
@@ -137,10 +153,10 @@ object Stash extends Command {
         
         banner = s"usage: $cmdPrefix [<options]"
 
-        flag("-u", "--include-unversioned", "Included unversioned files in the stash")
-          { _.copy(includeUnversioned = true) }
+        flag("-u", "--unversioned", "Include unversioned files in the stash")
+          { _.copy(unversioned = true) }
         
-        reqd[String]("-d", "--description=<desc>",    "A short description of the stash")
+        reqd[String]("-m", "--message=<msg>",    "A short description of the stash")
           { (desc, options) => options.copy(description = Some(desc)) }
         
         flag("-h", "--help", "Show this message")
@@ -176,6 +192,79 @@ object Stash extends Command {
       entries.head.msg.headOption getOrElse ""
     }
 
+    //  Runs `svn status` on the working copy root directory
+    //  If we are not including unversioned items then we filter them out and build the list
+    //
+    //  If we are including unversioned items then it is a bit more complicated:
+    //  `svn status` will include unversioned directories but will not include their contents
+    //  So in this case we must add these unversioned directories to the working copy and then
+    //  run `svn status` a second time.  The add operation is recursive so we only need to
+    //  do it on the top level unversioned directories.
+    //  At this point `svn status` will return all of the previously unversioned items as
+    //  "added" so we must mark them as unversioned in our own item list.
+    //  So this function will alter the working copy when unversioned items are being stashed.
+    private def getStashItems(wcRoot: Path, unversioned: Boolean): List[StashItem] = {
+      
+      //  We always filter out entries with item status of "normal".  These have only property changes.
+      //  which we do not care about.
+      //  We also filter out entries with item status of "unversioned" unless the user choseen to
+      //  include the unversioned files in the stash.
+      val included    = (e: StatusEntry) =>
+        e.itemStatus != NORMAL && (e.itemStatus != UNVERSIONED || unversioned)
+        
+      val toItem = (entry: StatusEntry) => {
+        val isDir = wcRoot.resolve(entry.path).toFile.isDirectory
+        StashItem(entry.path, entry.revision, entry.itemStatus, isDir)
+      }
+      
+      // Get the status starting at the wcRoot to determine what is dirty and must be stashed
+      def getWorkingCopyItems(): List[StashItem] = {
+        getSvnStatus(".", Some(wcRoot.toFile)).entries.toList filter included map toItem
+      }
+      
+      def addToWorkingCopy(paths: Seq[String]): Unit = {
+        val cmdLine = Seq("svn", "add", "--depth=infinity", "--no-auto-props") ++ paths
+        runCmd(cmdLine, Some(wcRoot.toFile))        
+      }
+      
+      
+      def fixupUnversionedItems(initialItems: List[StashItem]): List[StashItem] = {
+        val unversionedPaths = (initialItems filter (_.status == UNVERSIONED) map (_.path))
+        
+        if (unversionedPaths.isEmpty)
+          initialItems
+        else {
+          addToWorkingCopy(unversionedPaths)  // This recursively adds children of unversioned directories
+          //  If there are no unversioned directories then no need to get the status again
+          if (initialItems exists (item => item.isDir && item.status == UNVERSIONED)) {
+            // Now we have unversioned items that have been added to the working-copy.
+            // This time when we get the working copy status they will be reported as "added"
+            // We need to detect them and set the status to "unversioned" for our item list.
+            // These unversioned items will be those with paths that are equal to or start with
+            // the `unversionedPaths` that we set earilier.
+            
+            def isUnversioned(item: StashItem) = item.status == ADDED &&
+                                                 (unversionedPaths exists (prefix => item.path startsWith prefix))
+            getWorkingCopyItems() map {
+              case item if isUnversioned(item) => item.copy(status = UNVERSIONED)
+              case item                        => item
+            }
+          }
+          else
+            initialItems
+        }
+      }
+      
+      
+      // Start point of getStashItems()
+      getWorkingCopyItems() match {
+        case Nil                  => Nil
+        case items if unversioned => fixupUnversionedItems(items)
+        case items                => items
+      }
+    }
+    
+    
     override def run(args: Seq[String]): Unit = {
       val options = processCommandLine(args)
       val wcInfo  = getWorkingCopyInfo()  // Make sure the current directory is in a subversion working copy
@@ -183,19 +272,15 @@ object Stash extends Command {
 
       // Get the status starting at the wcRoot to determine what is dirty and must be stashed
       val wcStatus           = getSvnStatus(".", Some(wcRoot.toFile))
+      
+      val items = getStashItems(wcRoot, options.unversioned)
+      if (items.isEmpty)
+        successExit("No local changes to save")
+      
       val (branch, revision) = getCurrentBranch(wcRoot.toString)
       val description        = options.description getOrElse getLogMessage1st(wcRoot)
       
-      //  Filter out entries with item status of "normal".  These have only property changes.
-      //  Also filter out entries with item status of "unversioned" unless the user chose to
-      //  stash unversioned files.
-      val toStashItem = (entry: StatusEntry) => StashItem(entry.path, entry.revision, entry.itemStatus)
-      val unwanted    = (entry: StatusEntry) =>
-        entry.itemStatus  == "normal" ||
-        (entry.itemStatus == "unversioned" && !options.includeUnversioned)
-      val items     = wcStatus.entries filterNot unwanted map toStashItem
       val patchName = createPatchName()
-      
       stashPath.toFile.mkdir()  // Make sure stash directory exists
       createPatchFile(wcRoot, patchName)
       
@@ -207,11 +292,20 @@ object Stash extends Command {
         patchName,
         items)
       
-      val stashList = loadStashEntries()
-      // Put out new entry at the head of the list and save
-      saveStashEntries(stashEntry :: stashList)
+      // Put the new entry at the head of the list and save
+      saveStashEntries(stashEntry :: loadStashEntries())
       
-      //  Show the user what happened
+      // Lastly we revert the working copy.
+      // We will explicitly revert all entries to ensure that the --remove-added flag is honored.
+      // For added/unversioned directories we do not need to revert any entries below them
+      // as these entrie will be reverted recursively with their respective  directories.
+      val addedAndUnversionedDirs = items filter (i => i.isDir && (i.status == ADDED || i.status == UNVERSIONED))
+      val canSkip = (item: StashItem) => addedAndUnversionedDirs exists (d => item.path.startsWith(d.path) && item.path != d.path)
+      val revertPaths = items filterNot canSkip map (_.path)
+      val cmdLine = Seq("svn", "revert", "--remove-added", "--depth=infinity") ++ revertPaths
+      runCmd(cmdLine, Some(wcRoot.toFile))
+        
+      //  Let the user know we finished successfully
       println(s"Saved working copy state on ${green(branch)}[${yellow(revision)}]: $description")
     }
   }
