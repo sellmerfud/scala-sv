@@ -102,19 +102,8 @@ object Branch extends Command {
   }
   
   private def showCurrentBranch(options: Options): Unit = {
-
-    val info = getSvnInfo(options.path)
-    val TRUNK  = """\^.*/trunk.*""".r
-    val BRANCH = """\^.*/branches/([^/]+).*""".r
-    val TAG    = """\^.*/tags/([^/]+).*""".r
-    // Parse the XML log entries
-    val branch = info.relativeUrl match {
-      case TRUNK()      => "trunk"
-      case BRANCH(name) => s"branch:$name"
-      case TAG(name)    => s"tag:$name"
-      case _            => "cannot be determined"
-    }
-    println(s"Current branch: ${green(branch)} [${yellow(info.commitRev)}]")
+    val (branch, revision) = getCurrentBranch(options.path)
+    println(s"Current branch: ${green(branch)} [${yellow(revision)}]")
   }
   
   override def run(args: Seq[String]): Unit = {

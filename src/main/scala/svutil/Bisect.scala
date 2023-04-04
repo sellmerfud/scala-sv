@@ -69,10 +69,6 @@ object Bisect extends Command {
   }
   
   
-  implicit class ConfigWrapper(cfg: Config) {
-    def optString(path: String): Option[String] = if (cfg.getIsNull(path)) None else Some(cfg.getString(path))
-  }
-    
   //  Convert our BisectData to a Config value that can be saved to disk.
   private def toConfigObject(data: BisectData): ConfigObject = {
     
@@ -113,66 +109,9 @@ object Bisect extends Command {
     )
   }
 
-  private def findSvnDir(): File = {
-    def findIt(directory: Path): File = {
-      if (directory == null)
-        generalError(s"You must run this command from within a subversion working copy directory")
-      else
-        directory.resolve(".svn").toFile match {
-          case svn if svn.isDirectory => svn
-          case _                      => findIt(directory.getParent) 
-        }
-    }
-    
-    // Start with the current working directory
-    findIt(Paths.get("").toAbsolutePath)
-  }
-  
-  
-  private def findSvnTmp(): File = {
-
-      def findIt(directory: Path): File = {
-        if (directory == null)
-          generalError(s"Your current working directory is not with a subversion working copy")
-        else if (directory.resolve(".svn").toFile.isDirectory) {
-          // Found the .svn directory
-          val tmpDir = directory.resolve(".svn/tmp").toFile
-          if (tmpDir.isDirectory) {
-              if (tmpDir.canRead && tmpDir.canWrite)
-                tmpDir
-              else
-                generalError(s"Error, insufficent file permissions for ${tmpDir}")
-          }
-          else if (tmpDir.isFile)
-            generalError(s"Error, ${tmpDir} is not a directory")
-          else if (tmpDir.mkdir())
-            tmpDir
-          else
-            generalError(s"Error, ${tmpDir} does not exist and cannot be created")
-        }
-        else
-          findIt(directory.getParent)
-      }
       
-      // Start with the current working directory
-      findIt(Paths.get("").toAbsolutePath)
-  }
-  
-  //  Verifiy that the currrent working directory is an SVN working copy
-  //  and that we are at the top of that working copy.
-  private def getWorkingCopyInfo(): SvnInfo = {
-    try getSvnInfo(".")
-    catch {
-      case ExecError(_, _) =>
-        generalError(s"$scriptName $name must be run from within a subversion working copy directory.")
-        
-      case e: Throwable =>
-        generalError("Error verifying working copy\n" + (Option(e.getMessage) getOrElse e.getClass.getName))
-    }
-  }
-    
-  private def bisectDataFile = new File(findSvnDir(), "tmp/sv_bisect_data.json")
-  private def bisectLogFile  = new File(findSvnDir(), "tmp/sv_bisect_log")
+  private def bisectDataFile = getDataDirectory().resolve("sv_bisect_data.json").toFile
+  private def bisectLogFile  = getDataDirectory().resolve("sv_bisect_log").toFile
     
     
   private def loadBisectData(): Option[BisectData] = {
@@ -492,11 +431,11 @@ object Bisect extends Command {
     override def run(args: Seq[String]): Unit = {
       val options = processCommandLine(args)
       val cwd     = Paths.get("").toAbsolutePath
-      val svnDir  = findSvnDir()
-      val tmpDir  = new File(svnDir, "tmp")
       
-      if (!tmpDir.isDirectory && !tmpDir.mkdir())
-        generalError(s"Cannot acesss the temporary directory: $tmpDir")
+      //  Ensure that we are in a directory that is part of a subverion working copy
+      getWorkingCopyRoot() getOrElse {
+        generalError(s"You must run this command from within a subversion working copy directory")
+      }
       
       loadBisectData() match {
         case Some(data) =>
@@ -1131,7 +1070,7 @@ object Bisect extends Command {
       Nil
   }
   
-  def showHelp(): Nothing = {
+  private def showHelp(): Nothing = {
     val sv = scriptName
     val help = s"""|Available bisect commands:
                    |$sv $name start       Start a bisect session in the current subversion

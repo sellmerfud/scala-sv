@@ -3,9 +3,11 @@ package svutil
 
 import java.util.Locale
 import java.time.format.DateTimeFormatter
+import java.nio.file.{ Files, Paths, Path }
 import scala.util.Properties.propOrElse
 import java.time._
 import java.io.File
+import com.typesafe.config.Config
 import scala.xml._
 import Exec._
 import Color._
@@ -33,6 +35,12 @@ object Utilities {
     }
     def isInteger = str forall (_.isDigit)
   }
+
+
+  implicit class ConfigWrapper(cfg: Config) {
+    def optString(path: String): Option[String] = if (cfg.getIsNull(path)) None else Some(cfg.getString(path))
+  }
+    
   
   def joinPaths(base: String, others: String*): String = {
     val result = new StringBuilder(base.chomp("/"))
@@ -53,9 +61,65 @@ object Utilities {
     utc.withZoneSameInstant(ZoneId.systemDefault).toLocalDateTime
   }
   
+  //  Convert the local date to a utc and format it as a string
+  def toISODateString(date: LocalDateTime): String = {
+    val zonedDate = date.atZone(ZoneId.systemDefault)
+    val utcDate   = zonedDate.withZoneSameInstant(ZoneId.ofOffset("", ZoneOffset.UTC))    
+    utcDate.format(ISODateFormat)
+  }
+  
   def displayDate(date: LocalDateTime): String = date.format(DisplayDateFormat)
   def displayTime(date: LocalDateTime): String = date.format(DisplayTimeFormat)
   def displayDateTime(date: LocalDateTime): String = s"${displayDate(date)} ${displayTime(date)}"
+
+
+  //  Verifiy that the currrent working directory is an SVN working copy
+  def getWorkingCopyInfo(): SvnInfo = {
+    try getSvnInfo(".")
+    catch {
+      case ExecError(_, _) =>
+        generalError(s"This command must be run from within a subversion working copy directory.")
+        
+      case e: Throwable =>
+        generalError("Error verifying working copy\n" + (Option(e.getMessage) getOrElse e.getClass.getName))
+    }
+  }
+
+
+  //  Starting in the current working directory search for the top
+  //  of the working copy.  The directory that contains the .svn directory.
+  def getWorkingCopyRoot(): Option[Path] = {
+
+      def findIt(path: Path): Option[Path] =
+        if (path == null)
+          None
+        else 
+          path.resolve(".svn").toFile match {
+            case svn if svn.isDirectory => Some(path)
+            case _                      => findIt(path.getParent)
+          }
+      
+      // Start with the current working directory path
+      findIt(Paths.get("").toAbsolutePath)
+  }
+  
+  
+  //  We create a .sv directory in the top directory of the working copy
+  //  This gives sv commands a place to store data
+  //  This will throw an error of the directory cannot be resloved.
+  def getDataDirectory(): Path = {
+    val wcRoot  = getWorkingCopyRoot() getOrElse {
+      generalError(s"You must run this command from within a subversion working copy directory")
+    }
+    
+    val dotSVDir = wcRoot.resolve( ".sv").toFile
+    if (dotSVDir.isDirectory || dotSVDir.mkdir())
+      dotSVDir.toPath
+    else
+      generalError(s"Unable to create the .sv directory in your working copy")
+  }
+  
+
 
   // ==========================================
   // SVN Info
@@ -116,6 +180,24 @@ object Utilities {
     entries.toSeq map parseSvnInfo
   }
 
+
+  //  Using svn info for the path, return the branch name and the current commit revision
+  def getCurrentBranch(path: String): (String, String) = {
+
+    val info = getSvnInfo(path)
+    val TRUNK  = """\^.*/trunk.*""".r
+    val BRANCH = """\^.*/branches/([^/]+).*""".r
+    val TAG    = """\^.*/tags/([^/]+).*""".r
+    // Parse the XML log entries
+    val branch = info.relativeUrl match {
+      case TRUNK()      => "trunk"
+      case BRANCH(name) => s"$name"
+      case TAG(name)    => s"$name"
+      case _            => "cannot be determined"
+    }
+    (branch, info.commitRev)
+  }
+
   
   // ==========================================
   // SVN Log Entry
@@ -163,7 +245,7 @@ object Utilities {
   }
   
   // ==========================================
-  // SVN ist Entry
+  // SVN List Entry
   // ==========================================
   case class ListEntry(name: String, kind: String, size: Option[Long], commitRev: String, commitAuthor: String, commitDate: LocalDateTime)
   case class SvnList(path: String, entries: List[ListEntry])
@@ -229,6 +311,32 @@ object Utilities {
       println(lineColor(line)(line))
   }
   
+  case class StatusEntry(path: String, itemStatus: String, propsStatus: String, revision: String)
+  case class SvnStatus(path: String, entries: Seq[StatusEntry])
+
+  // cwd specifies the directory where the command will run.
+  // This affcts the path values that are returned by the svn status command
+  // If the path argument is an absolute path, then the paths returned will also be absolute
+  // If the path argument is a relative path, then the path of each entry will be relateive
+  // to the givne path.
+  def getSvnStatus(path: String, cwd: Option[File]): SvnStatus = {
+    val cmdLine    = Seq("svn", "status", "--xml", path)
+    val out        = runCmd(cmdLine, cwd)
+    val targetNode = (XML.loadString(out.mkString("\n")) \ "target").head
+    val entryNodes = (targetNode \ "entry")
+
+    val entries = for (entry <- entryNodes.toSeq) yield {
+      val wcNode = (entry \ "wc-status").head
+      // unversioned entries will not have a revision
+      val revision = if (wcNode.attributes("revision") == null) "-1" else wcNode.attributes("revision").head.text
+      StatusEntry(
+        path        = entry.attributes("path").head.text,
+        itemStatus  = wcNode.attributes("item").head.text,
+        propsStatus = wcNode.attributes("props").head.text,
+        revision    = revision)
+    }
+    SvnStatus(targetNode.attributes("path").head.text, entries)
+  }
 }
 
 
