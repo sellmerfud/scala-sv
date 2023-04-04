@@ -292,10 +292,8 @@ object Utilities {
       logEntry.paths foreach (p => println(p.formatted))
   }
   
-  def showChangeDiff(url: String, commitRev: String): Unit = {
-    val out = runCmd(Seq("svn", "diff", "--change", commitRev, url))
-
-    def lineColor(line: String): (String) => String = {
+  def printDiffLine(line: String): Unit = {
+    val color: (String) => String = {
       if      ((line startsWith "---") || (line startsWith "+++")) blue _
       else if (line startsWith "Index:")                           yellow _
       else if (line startsWith "==========")                       yellow _
@@ -306,9 +304,15 @@ object Utilities {
       else                                                         white _ 
     }
 
+    println(color(line))
+  }
+  
+  
+  def showChangeDiff(url: String, commitRev: String): Unit = {
+    val out = runCmd(Seq("svn", "diff", "--change", commitRev, url))
+
     println()
-    for (line <- out)
-      println(lineColor(line)(line))
+    out foreach printDiffLine
   }
   
   case class StatusEntry(path: String, itemStatus: String, propsStatus: String, revision: String)

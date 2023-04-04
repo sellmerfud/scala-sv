@@ -33,22 +33,54 @@ object Stash extends Command {
   private val DELETED     = "deleted"
   private val MODIFIED    = "modified"
   
+  private case class StashRef(index: Int)
+    
+  // A stash reference can be an integer or stash-<n>
+  private val stashRefParser = (arg: String) => {
+    val stashArg = """^(?:stash-)?(\d+)$""".r
+    arg match {
+      case stashArg(ref) => StashRef(ref.toInt)
+      case _             => throw new InvalidArgumentException(s" is not a valid stash reference")
+    }
+  }
+  
   // path for directories wil end with a slash/  (only happens for remved directories)
   // revision of the file when it was modified (for display only)
   // status will be one of: deleted, modified, added, unversioned
-  case class StashItem(path: String, revision: String, status: String, isDir: Boolean)
+  private case class StashItem(path: String, revision: String, status: String, isDir: Boolean) {
+    def pathDisplay = if (isDir) s"$path/" else path
+    def pathColor = status match {
+      case ADDED       => green _
+      case DELETED     => red _
+      case MODIFIED    => purple _
+      case _           => white _
+    }
+    
+    def statusDisplay = status match {
+      case UNVERSIONED => "?" 
+      case ADDED       => green("A")
+      case DELETED     => red("D")
+      case MODIFIED    => purple("M")
+      case _           => " "
+    }
+    // ADDED and UNVERSIONED will have a revision of -1
+    def revisionDisplay = if (revision == "-1") "" else s"[${yellow(revision)}]"
+  }
   
-  case class StashEntry(
+  private case class StashEntry(
     branch: String,        // branch from which the stash was created (trunk, 8.1, etc.)
     revision: String,      // commit revision of working copy root when stash was created
     description: String,
     date: LocalDateTime,   // time of creation
     patchName: String,     // name of patch file for this stash relative to .sv/stash/
-    items: Seq[StashItem])
+    items: Seq[StashItem]) {
+      
+      def summary = s"${green(branch)}[${yellow(revision)}]: $description"
+    }
 
-  def stashPath         = getDataDirectory().resolve("stash")
-  def stashEntriesFile  = stashPath.resolve("stash_entries.json").toFile
-  def createPatchName() = s"${UUID.randomUUID}.patch"
+  private def stashPath         = getDataDirectory().resolve("stash")
+  private def stashEntriesFile  = stashPath.resolve("stash_entries.json").toFile
+  private def createPatchName() = s"${UUID.randomUUID}.patch"
 
   private def toConfigObject(stashEntries: Seq[StashEntry]): ConfigObject = {
 
@@ -122,7 +154,7 @@ object Stash extends Command {
       Nil
   }
    
-  def saveStashEntries(entries: List[StashEntry]): Unit = {
+  private def saveStashEntries(entries: List[StashEntry]): Unit = {
     val file = stashEntriesFile
     try {
       val opts   = ConfigRenderOptions.concise.setJson(true).setFormatted(true)
@@ -137,7 +169,37 @@ object Stash extends Command {
   }  
    
 
-  // == Start Command ====================================================
+  //  Update the working copy by applying a stash entry
+  private def applyStash(stash: StashEntry, wcRoot: Path, dryRun: Boolean): Unit = {
+    val patchFile  = stashPath.resolve(stash.patchName).toString
+    val cmdLine  = if (dryRun) 
+      Seq("svn", "patch", "--dry-run", patchFile)
+    else
+      Seq("svn", "patch", patchFile)
+
+    // First apply the patch
+    runCmd(cmdLine, Some(wcRoot.toFile)) foreach println
+    
+    if (!dryRun) {
+      // The working copy has been restored via the patch, but and files that were
+      // unversioned when the stash was created will not appear as "added".  We must
+      // run `svn revert` on each unversioned item so that it will once again become unversioned.
+      val unversionedItems = stash.items filter (_.status == UNVERSIONED)
+      if (unversionedItems.nonEmpty) {
+        val unversionedDirs = unversionedItems filter (_.isDir)
+        val canSkip = (item: StashItem) => unversionedDirs exists (d => item.path.startsWith(d.path) && item.path != d.path)
+        val revertPaths = unversionedItems filterNot canSkip map (_.path)
+        val cmdLine = Seq("svn", "revert", "--depth=infinity") ++ revertPaths
+        runCmd(cmdLine, Some(wcRoot.toFile))        
+      }
+    
+      //  Let the user know we finished successfully
+      println(s"Updated working copy state - ${stash.summary}")
+    }
+  }
+   
+
+  // == Push Command ====================================================
   private case object Push extends StashCommand {
     override val cmdName = "push"
       
@@ -152,6 +214,9 @@ object Stash extends Command {
         val cmdPrefix = s"$scriptName $name [$cmdName]"
         
         banner = s"usage: $cmdPrefix [<options]"
+        separator("")
+        separator("Push working copy copy to the stash and revert the working copy")
+        separator("Options:")
 
         flag("-u", "--unversioned", "Include unversioned files in the stash")
           { _.copy(unversioned = true) }
@@ -269,11 +334,8 @@ object Stash extends Command {
       val options = processCommandLine(args)
       val wcInfo  = getWorkingCopyInfo()  // Make sure the current directory is in a subversion working copy
       val wcRoot  = getWorkingCopyRoot().get  // All commands will be run from the top dir
-
-      // Get the status starting at the wcRoot to determine what is dirty and must be stashed
-      val wcStatus           = getSvnStatus(".", Some(wcRoot.toFile))
+      val items   = getStashItems(wcRoot, options.unversioned)
       
-      val items = getStashItems(wcRoot, options.unversioned)
       if (items.isEmpty)
         successExit("No local changes to save")
       
@@ -284,7 +346,7 @@ object Stash extends Command {
       stashPath.toFile.mkdir()  // Make sure stash directory exists
       createPatchFile(wcRoot, patchName)
       
-      val stashEntry = StashEntry(
+      val stash = StashEntry(
         branch,
         revision,
         description,
@@ -293,7 +355,7 @@ object Stash extends Command {
         items)
       
       // Put the new entry at the head of the list and save
-      saveStashEntries(stashEntry :: loadStashEntries())
+      saveStashEntries(stash :: loadStashEntries())
       
       // Lastly we revert the working copy.
       // We will explicitly revert all entries to ensure that the --remove-added flag is honored.
@@ -306,11 +368,12 @@ object Stash extends Command {
       runCmd(cmdLine, Some(wcRoot.toFile))
         
       //  Let the user know we finished successfully
-      println(s"Saved working copy state on ${green(branch)}[${yellow(revision)}]: $description")
+      println(s"Saved working copy state - ${stash.summary}")
     }
   }
   
   
+  // == List Command ====================================================
   private case object List extends StashCommand {
     override val cmdName = "list"
       
@@ -320,6 +383,9 @@ object Stash extends Command {
         val cmdPrefix = s"$scriptName $name $cmdName"
         
         banner = s"usage: $cmdPrefix [<options]"
+        separator("")
+        separator("Display stash entries")
+        separator("Options:")
 
         flag("-h", "--help", "Show this message")
             { _ => println(help); throw HelpException() }
@@ -335,29 +401,311 @@ object Stash extends Command {
       
       for ((stash, index) <- loadStashEntries().view.zipWithIndex) {
       
-        println(s"stash-$index, on ${green(stash.branch)}[${yellow(stash.revision)}]: ${stash.description}")  
+        println(s"stash-$index, - ${stash.summary}")  
       }
     }
   }
+  
+  // == Show Command ====================================================
+  private case object Show extends StashCommand {
+    override val cmdName = "show"
+      
+    private case class Options(
+      stashIndex: Option[Int] = None,
+      showDiff:   Boolean     = false
+    )
+      
+    private def processCommandLine(args: Seq[String]): Options = {
+
+      val parser = new OptionParser[Options] {
+        val cmdPrefix = s"$scriptName $name $cmdName"
+        
+        addArgumentParser(stashRefParser)
+        
+        banner = s"usage: $cmdPrefix [<options]"
+        separator("")
+        separator("Show the details of a stash entry")
+        separator("Options:")
+
+        flag("-d", "--diff", "Display the patch file differences")
+            { _.copy(showDiff = true)}
+            
+        flag("-h", "--help", "Show this message")
+            { _ => println(help); throw HelpException() }
+            
+        arg[StashRef] { (ref, options) => options.copy(stashIndex = Some(ref.index)) }
+
+        separator("")
+        separator("If you omit the stash-ref, stash-0 is used by default")
+      }
+
+      parser.parse(args, Options())
+    }
+    
+    def printPatchFile(path: Path): Unit = {
+      def read1Line(reader: BufferedReader): Unit =
+          reader.readLine match {
+            case null => // Reached eof
+            case line =>
+              printDiffLine(line)
+              read1Line(reader)
+          }
+        
+      try {
+        val reader = new BufferedReader(new FileReader(path.toFile))
+        read1Line(reader)
+        reader.close()
+      }
+      catch {
+        case e: Throwable =>
+          generalError(s"Error reading patch file ($path): ${e.getMessage}")
+      }
+    }
+    
+    override def run(args: Seq[String]): Unit = {
+      val options    = processCommandLine(args)
+      val wcInfo     = getWorkingCopyInfo()  // Make sure the current directory is in a subversion working copy
+      val wcRoot     = getWorkingCopyRoot().get  // All commands will be run from the top dir
+      val index      = options.stashIndex getOrElse 0
+      val stashList  = loadStashEntries()
+      val stash      = if (stashList.size >= index + 1)
+        stashList(index)
+      else
+        generalError(s"stash-$index does not exist in the stash")
+      
+      // We show paths relative to the user current working directory
+      val cwd          = Paths.get("").toAbsolutePath
+      val pathPrefix   = cwd.relativize(wcRoot)
+      val relStashPath = cwd.relativize(stashPath)
+      
+      println(s"stash     : ${stash.summary}")
+      println(s"created   : ${purple(displayDateTime(stash.date))}")
+      println(s"patch file: ${blue(relStashPath.resolve(stash.patchName).toString)}")
+      println("-" * 70)
+      for (item <- stash.items)
+        println(s"${item.statusDisplay} ${item.pathColor(pathPrefix.resolve(item.pathDisplay).toString)} ${item.revisionDisplay}")
+      if (options.showDiff) {
+        println()
+        printPatchFile(stashPath.resolve(stash.patchName))
+      }
+    }
+  }
+  
+  // == Pop Command ====================================================
+  private case object Pop extends StashCommand {
+    override val cmdName = "pop"
+      
+    // sv stash apply [<stash-ref>]
+    private case class Options(
+      stashIndex: Option[Int] = None,
+      dryRun:     Boolean     = false)
+        
+    private def processCommandLine(args: Seq[String]): Options = {
+
+      val parser = new OptionParser[Options] {
+        val cmdPrefix = s"$scriptName $name $cmdName"
+        
+        addArgumentParser(stashRefParser)
+        
+        banner = s"usage: $cmdPrefix [<options] [<stash-ref>]"
+        separator("")
+        separator("Remove a stash entry and apply it to the working copy")
+        separator("Options:")
+
+        flag("-n", "--dry-run", "Show the patch output but do not update the working copy",  "or remove the stash entry")
+          { _.copy(dryRun = true) }
+        
+        flag("-h", "--help", "Show this message")
+            { _ => println(help); throw HelpException() }
+            
+        arg[StashRef] { (ref, options) => options.copy(stashIndex = Some(ref.index)) }
+
+        separator("")
+        separator(s"If you omit the stash-ref, stash-0 is used by default")
+      }
+
+      parser.parse(args, Options())
+    }
+    
+    override def run(args: Seq[String]): Unit = {
+      val options    = processCommandLine(args)
+      val wcInfo     = getWorkingCopyInfo()  // Make sure the current directory is in a subversion working copy
+      val wcRoot     = getWorkingCopyRoot().get  // All commands will be run from the top dir
+      val index      = options.stashIndex getOrElse 0
+      val stashList  = loadStashEntries()
+      val stash      = if (stashList.size >= index + 1)
+        stashList(index)
+      else
+        generalError(s"stash-$index does not exist in the stash")
+      
+      applyStash(stash, wcRoot, options.dryRun)
+
+      if (!options.dryRun) {
+        // remove the patch file
+        // Remove the stash entry and save
+        stashPath.resolve(stash.patchName).toFile.delete()
+        saveStashEntries(stashList filterNot (_ == stash))
+        println(s"Dropped stash -  ${stash.summary}")        
+      }
+    }
+  }
+  
+  // == Apply Command ====================================================
+  private case object Apply extends StashCommand {
+    override val cmdName = "apply"
+      
+    // sv stash apply [<stash-ref>]
+    private case class Options(
+      stashIndex: Option[Int] = None,
+      dryRun:     Boolean     = false)
+        
+    private def processCommandLine(args: Seq[String]): Options = {
+
+      val parser = new OptionParser[Options] {
+        val cmdPrefix = s"$scriptName $name $cmdName"
+        
+        addArgumentParser(stashRefParser)
+        
+        banner = s"usage: $cmdPrefix [<options] [<stash-ref>]"
+        separator("")
+        separator("Apply a stash entry to the working copy")
+        separator("Options:")
+
+        flag("-n", "--dry-run", "Show the patch output but do not update the working copy")
+          { _.copy(dryRun = true) }
+        
+        flag("-h", "--help", "Show this message")
+            { _ => println(help); throw HelpException() }
+            
+        arg[StashRef] { (ref, options) => options.copy(stashIndex = Some(ref.index)) }
+
+        separator("")
+        separator(s"If you omit the stash-ref, stash-0 is used by default")
+      }
+
+      parser.parse(args, Options())
+    }
+    
+    override def run(args: Seq[String]): Unit = {
+      val options    = processCommandLine(args)
+      val wcInfo     = getWorkingCopyInfo()  // Make sure the current directory is in a subversion working copy
+      val wcRoot     = getWorkingCopyRoot().get  // All commands will be run from the top dir
+      val index      = options.stashIndex getOrElse 0
+      val stashList  = loadStashEntries()
+      val stash      = if (stashList.size >= index + 1)
+        stashList(index)
+      else
+        generalError(s"stash-$index does not exist in the stash")
+      
+      applyStash(stash, wcRoot, options.dryRun)
+    }
+  }
+  
+  
+  // == Drop Command ====================================================
+  private case object Drop extends StashCommand {
+    override val cmdName = "drop"
+      
+    // sv stash apply [<stash-ref>]
+    private case class Options(stashIndex: Option[Int] = None)
+        
+    private def processCommandLine(args: Seq[String]): Options = {
+
+      val parser = new OptionParser[Options] {
+        val cmdPrefix = s"$scriptName $name $cmdName"
+        
+        addArgumentParser(stashRefParser)
+        
+        banner = s"usage: $cmdPrefix [<options] [<stash-ref>]"
+        separator("")
+        separator("Remove a stash entry")
+        separator("Options:")
+
+        flag("-h", "--help", "Show this message")
+            { _ => println(help); throw HelpException() }
+            
+        arg[StashRef] { (ref, options) => options.copy(stashIndex = Some(ref.index)) }
+
+        separator("")
+        separator(s"If you omit the stash-ref, stash-0 is used by default")
+      }
+
+      parser.parse(args, Options())
+    }
+    
+    override def run(args: Seq[String]): Unit = {
+      val options    = processCommandLine(args)
+      val wcInfo     = getWorkingCopyInfo()  // Make sure the current directory is in a subversion working copy
+      val wcRoot     = getWorkingCopyRoot().get  // All commands will be run from the top dir
+      val index      = options.stashIndex getOrElse 0
+      val stashList  = loadStashEntries()
+      val stash      = if (stashList.size >= index + 1)
+        stashList(index)
+      else
+        generalError(s"stash-$index does not exist in the stash")
+      
+      // remove the patch file
+      // Remove the stash entry and save
+      stashPath.resolve(stash.patchName).toFile.delete()
+      saveStashEntries(stashList filterNot (_ == stash))
+      println(s"Droped ${stash.summary}")
+    }
+  }
+  
+  // == Clear Command ====================================================
+  private case object Clear extends StashCommand {
+    override val cmdName = "clear"
+      
+    private def processCommandLine(args: Seq[String]): Unit = {
+
+      val parser = new OptionParser[Unit] {
+        val cmdPrefix = s"$scriptName $name $cmdName"
+        
+        addArgumentParser(stashRefParser)
+        
+        banner = s"usage: $cmdPrefix [<options]"
+        separator("")
+        separator(s"Remove all stash entries")
+        separator("Options:")
+
+        flag("-h", "--help", "Show this message")
+            { _ => println(help); throw HelpException() }
+      }
+
+      parser.parse(args, ())
+    }
+    
+    override def run(args: Seq[String]): Unit = {
+      processCommandLine(args) // To handle --help, -h
+      val wcInfo     = getWorkingCopyInfo()  // Make sure the current directory is in a subversion working copy
+      val stashList  = loadStashEntries()
+
+      // remove each patch file
+      for (stash <- loadStashEntries())
+        stashPath.resolve(stash.patchName).toFile.delete()
+      // Remove the stash entries file
+      stashEntriesFile.delete()
+    }
+  }
+  
      
   private def showHelp(): Nothing = {
     val sv = scriptName
     val help = s"""|Available stash commands:
-                   |$sv $name push        Push dirty working changes copy to the stash
-                   |                      and revert the working copy
-                   |$sv $name list        Display stash list
-                   |$sv $name show        Show the details of a stash entry
-                   |$sv $name pop         Remove a stash entry and apply it to the working copy
-                   |$sv $name apply       Apply a stash entry to the working copy
-                   |$sv $name drop        Remove a stash entry
-                   |$sv $name clear       Remove all stash entries
+                   |$sv $name push    Push working copy copy to the stash and revert the working copy
+                   |$sv $name pop     Remove a stash entry and apply it to the working copy
+                   |$sv $name list    Display stash entries
+                   |$sv $name show    Show the details of a stash entry
+                   |$sv $name apply   Apply a stash entry to the working copy
+                   |$sv $name drop    Remove a stash entry
+                   |$sv $name clear   Remove all stash entries
                    |
                    |Type '$sv $name <command> --help' for details on a specific command""".stripMargin
       println(help)
       throw HelpException()
   }
 
-  private val stashCommands = Push::List::Nil
+  private val stashCommands = Push::List::Pop::Apply::Drop::Show::Clear::Nil
 
   private def matchCommand(cmdName: String, cmdList: List[StashCommand]): List[StashCommand] = {
     if ("""^[a-zA-Z][-a-zA-Z0-9_]*""".r matches cmdName)
@@ -377,7 +725,7 @@ object Stash extends Command {
   // Main entry point to bisect commnad
   override def run(args: Seq[String]): Unit = {
 
-    if (args.nonEmpty && (args.head == "help" || args.head == "--help"))
+    if (args.nonEmpty && (args.head == "help" || args.head == "--help" || args.head == "-h"))
       showHelp();
     else if (args.isEmpty || (args.head.startsWith("-") && args.head != "--"))
       Push.run(args)
