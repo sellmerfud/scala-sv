@@ -205,16 +205,17 @@ object Utilities {
   case class FromPath(path: String, revision: String)
   case class LogPath(path: String, kind: String, action: String, textMods: Boolean, propMods: Boolean, fromPath: Option[FromPath]) {
     def formatted:String = {
-      val coloredAction = action match {
-        case "D" => red("D")
-        case "A" => green("A")
-        case _   => white(action)
+      val color = action match {
+        case "D" => red _
+        case "A" => green _
+        case "M" => purple _
+        case _   => white _
       }
       val from = fromPath match {
         case Some(FromPath(path, revision)) => s"  (from ${path}:${revision})"
         case None                           => ""
       }
-      s"  ${coloredAction} ${blue(path)}${red(from)}"
+      s"  ${color(action)} ${color(path)}${purple(from)}"
     }
   }
   case class LogEntry(revision: String, author: String, date: LocalDateTime, msg: Seq[String], paths: Seq[LogPath])
