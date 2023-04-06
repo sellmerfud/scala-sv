@@ -23,6 +23,7 @@ object Log extends Command {
     show:      Boolean        = false,
     noCopy:    Boolean        = false,
     incoming:  Boolean        = false,
+    reverse:   Boolean        = false,
     revisions: Vector[String] = Vector.empty,
     search:    Vector[Search] = Vector.empty,
     paths:     Vector[String] = Vector.empty)
@@ -68,6 +69,9 @@ object Log extends Command {
                                                   "See the svn log help for more information")
         { (revision, options) => options.copy(revisions = options.revisions :+ revision) }
       
+      flag("", "--reverse", "Output the chosen commits in the reverse order")
+        { _.copy(reverse = true) }
+      
       flag("-i", "--incoming", "Display commits incoming with next update", "shorthand for -rHEAD:BASE")
           { options => options.copy(incoming = true, revisions = options.revisions :+ "HEAD:BASE") }
 
@@ -95,9 +99,10 @@ object Log extends Command {
     parser.parse(args, Options())
   }
   
-  def showResults(logData: String, options: Options): Unit = {
+  def showResults(cmdLine: Seq[String], options: Options): Unit = {
     import scala.xml._
     
+    val logData = runCmd(cmdLine).mkString("\n")
     // Parse the XML log entries
     val entries = (XML.loadString(logData) \ "logentry") map parseLogEntry
 
@@ -145,7 +150,8 @@ object Log extends Command {
         }
     }
     
-    for (LogEntry(revision, author, date, fullMsg, logPaths) <- entries if Some(revision) != omitRev) {
+    val orderedEntries = if (options.reverse) entries.reverse else entries
+    for (LogEntry(revision, author, date, fullMsg, logPaths) <-orderedEntries if Some(revision) != omitRev) {
       val msg1st   = fullMsg.headOption getOrElse ""
       val prefix   = buildPrefix(revision, author, date)
 
@@ -161,6 +167,11 @@ object Log extends Command {
     }
   }
     
+  def looksLikeRevision(str: String): Boolean = {
+   val revPart = """(?:\d+|HEAD|BASE|PREV|COMMITTED)""".r
+   s"""^$revPart(?::$revPart)?$$""".r matches str 
+  }
+    
   def buildCmdLine(options: Options): Seq[String] = {
     var cmdLine = Vector[String]("svn", "log", "--xml")
     
@@ -170,12 +181,31 @@ object Log extends Command {
     if (options.noCopy)
       cmdLine :+= "--stop-on-copy"
     
-    cmdLine :++= (options.revisions map { revision => s"--revision=$revision" })
     cmdLine :++= (options.search map { 
       case Search(glob, false) => s"--search=$glob"
       case Search(glob, true) => s"--search-and=$glob"
     })
-    cmdLine :++= options.paths
+    
+    //  If no revisions are specified and the first 'path' looks like a revision
+    //  then treat it as one, appending :0 if it does not have a range.
+    //
+    //  If only a single revision is specified and it does not contain
+    //  a range,then we add :0 so that we get the log starting from that point.
+    val paths = if (options.revisions.isEmpty && options.paths.nonEmpty && looksLikeRevision(options.paths.head)) {
+      val rev = options.paths.head
+      val fullRev = if (rev contains ':') rev else s"$rev:0"
+      cmdLine :+= s"--revision=${fullRev}"
+      options.paths.tail
+    }
+    else {
+      if (options.revisions.size == 1 && !(options.revisions.head contains ':'))
+        cmdLine :+= s"--revision=${options.revisions.head}:0"
+      else
+        cmdLine :++= (options.revisions map { revision => s"--revision=$revision" })
+      options.paths
+    }  
+      
+    cmdLine :++= paths          
     cmdLine
   }
   
@@ -186,6 +216,6 @@ object Log extends Command {
     val status = if (options.show)
       println(cmdLine mkString " ")
     else
-      showResults(runCmd(cmdLine).mkString("\n"), options)    
+      showResults(cmdLine, options)    
   } 
 }
