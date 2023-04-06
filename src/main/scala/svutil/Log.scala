@@ -130,12 +130,14 @@ object Log extends Command {
     else
       None
     
-    //  First get the length of the longest revision string
-    val maxRevLen = entries.foldLeft(0) { (maxLen, entry) => entry.revision.length max maxLen }
-    val maxAuthorLen = if (options.author)
-      entries.foldLeft(0) { (maxLen, entry) => entry.author.length max maxLen }      
+    //  First get the length of the longest revision string and author name
+    val (maxRevLen, maxAuthorLen) = if (options.author)
+      entries.foldLeft((0, 0)) {
+        case ((maxRev, maxAuthor), entry) =>
+          (entry.revision.length max maxRev, entry.author.length max maxAuthor)
+      }
     else
-      0
+      (entries.foldLeft(0) { (maxRev, entry) => entry.revision.length max maxRev }, 0)
 
     def buildPrefix(revision: String, author: String, date: LocalDateTime): String = {
         val revFormat    = s"%${maxRevLen}s"
