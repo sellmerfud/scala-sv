@@ -64,11 +64,9 @@ object Log extends Command {
       flag("-v", "--verbose", "Shorthand for --author --time --full")
           { _.copy(author = true, date = true, time = true, full = true) }
     
-      reqd[String]("-r", "--revision=<revision>", "Specify a revision or a range of revisions",
-                                                  "Can be specified multiple times",
-                                                  "See the svn log help for more information")
+      reqd[String]("-r", "--revision=<revision>", "Specify a revision or a range of revisions")
         { (revision, options) => options.copy(revisions = options.revisions :+ revision) }
-      
+
       flag("", "--reverse", "Output the chosen commits in the reverse order")
         { _.copy(reverse = true) }
       
@@ -94,6 +92,8 @@ object Log extends Command {
     
       separator("")
       separator("By default shows only the first line of each commit message (see --full)")
+      separator("If only 1 revision is given and it is not a range then :0 is appended to make it a range.")
+      separator("If no revision is given and the first path looks like a revision it will be treated as one")
     }
   
     parser.parse(args, Options())

@@ -279,6 +279,12 @@ object Utilities {
   }
   
   
+  def amtOf(num: Int, singular: String) = num match {
+    case 1 => s"$num $singular"
+    case _ => s"$num ${singular}s"
+  }
+  
+  
   def showCommit(logEntry: LogEntry, showMsg: Boolean = true, showPaths: Boolean = true): Unit = {
     println("-------------------------------------------------------------------")
     println(s"Commit: ${yellow(logEntry.revision)}")
@@ -289,6 +295,20 @@ object Utilities {
     if (showMsg)
       logEntry.msg foreach (m => println(s"  $m"))
   
+    println()
+    //  Path summary
+    if (logEntry.paths.nonEmpty) {
+      case class Totals(mod: Int = 0, add: Int = 0, del: Int = 0)
+      val totals = logEntry.paths.foldLeft(Totals()) { (t, p) =>
+        p.action match {
+          case "M" => t.copy(mod = t.mod + 1)
+          case "A" => t.copy(add = t.add + 1)
+          case "D" => t.copy(del = t.del + 1)
+          case _   => t
+        }
+      }
+      println(cyan(s"${amtOf(totals.mod, "file")} modified, ${totals.add} added, ${totals.del} deleted"))
+    }
     if (showPaths)
       logEntry.paths foreach (p => println(p.formatted))
   }

@@ -16,17 +16,17 @@ object Show extends Command {
   
   case class Options(
     revision:  Option[String] = None,
-    path:      String         = ".",
+    paths:     Vector[String] = Vector.empty,
     showMsg:   Boolean        = true,
-    showPaths: Boolean        = true,
-    showDiff:  Boolean        = true
+    showPaths: Boolean        = false,
+    showDiff:  Boolean        = false
   )
   
   private def processCommandLine(args: Seq[String]): Options = {
     import org.sellmerfud.optparse._
     
     val parser = new OptionParser[Options] {
-      banner = s"usage: $scriptName $name [<options>] [<path>|<url>]"
+      banner = s"usage: $scriptName $name [<options>] [<revision>] [<path>|<url>]"
       separator("")
       separator(description)
       separator("Options:")
@@ -37,10 +37,10 @@ object Show extends Command {
       bool("-m", "--message", "Show the commit message (default yes)")
         { (value, options) => options.copy(showMsg = value) }
 
-      bool ("-p", "--paths", "Show the paths affected by the commit (default yes)")
+      bool ("-p", "--paths", "Show the paths affected by the commit (default no)")
         { (value, options) => options.copy(showPaths = value) }
         
-      bool ("-d", "--diff", "Show the diff output of the commit (default yes)")
+      bool ("-d", "--diff", "Show the diff output of the commit (default no)")
         { (value, options) => options.copy(showDiff = value) }
         
       flag ("-c", "--concise", "Shorthand for --no-message --no-paths --no-diff")
@@ -49,21 +49,26 @@ object Show extends Command {
       flag("-h", "--help", "Show this message")
           { _ => println(help); sys.exit(0) }
     
-      arg[String] { (path, options) => options.copy(path = path) }  
+      arg[String] { (path, options) => options.copy(paths = options.paths :+ path) }  
         
       separator("")
       separator("<revision> defaults to the current working copy revision")
-      separator("<path> defaults to '.'")
+      separator("if no -r<revision> is given, and first path argument looks like a revision")
+      separator("then it is treated as a revision")
+      separator("If no <path> is given it defaults to the current working copy directory")
     }
     
     parser.parse(args, Options())
   }
   
-  
-  private def getLogEntry(options: Options): Option[LogEntry] = {
-    val revArg   = (options.revision map (r => s"--revision=$r")).toSeq
-    val pathsArg = (if (options.showPaths) Some("--verbose") else None).toSeq
-    val cmdLine  = Seq("svn", "log", "--xml", "--limit=1") ++ revArg ++ pathsArg :+ options.path
+
+  private def getLogEntry(path: String, options: Options): Option[LogEntry] = {
+    //  In some cases when the revision is PREV, it may not produce a log entry 
+    //  even though 'svn info' would succeed.  To work around this oddity
+    //  we append :0 to the revision and limit the log to 1 entry.
+    val fixRev   = (rev: String) => if (rev contains ':') rev else s"$rev:0"
+    val revArg   = (options.revision map (r => s"--revision=${fixRev(r)}")).toSeq
+    val cmdLine  = Seq("svn", "log", "--xml", "--limit=1", "--verbose") ++ revArg :+ path
     val logXML   = XML.loadString(runCmd(cmdLine).mkString("\n"))
     (logXML \ "logentry").headOption map parseLogEntry
   }
@@ -74,17 +79,19 @@ object Show extends Command {
     val options = processCommandLine(args)
     // If no revision is given an the path argument looks like a revision
     // then treat it as a revision for the current working directory
-    val finalOptions = if (options.revision.isEmpty && looksLikeRevision(options.path))
-      options.copy(path = ".", revision = Some(options.path))
-      else
-        options
-    
-    getLogEntry(finalOptions) foreach { log =>
+    val finalOptions = if (options.revision.isEmpty && options.paths.nonEmpty && looksLikeRevision(options.paths.head)) {
+      options.copy(revision = Some(options.paths.head), paths = options.paths.tail)
+    }
+    else
+      options
+    val path = finalOptions.paths.headOption getOrElse "."
+        
+    getLogEntry(path, finalOptions) foreach { log =>
       println()
-      println(blue(finalOptions.path))
+      println(blue(path))
       showCommit(log, finalOptions.showMsg, finalOptions.showPaths)
       if (finalOptions.showDiff)
-        showChangeDiff(finalOptions.path, log.revision)
+        showChangeDiff(path, log.revision)
     }
   } 
 }
