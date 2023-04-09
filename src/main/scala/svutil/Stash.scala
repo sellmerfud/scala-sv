@@ -206,6 +206,7 @@ object Stash extends Command {
     // sv stash [push] [-u|--include-unversioned] [-d|--description=<desc>]
     private case class Options(
       unversioned: Boolean        = false,
+      revertWorkingCopy: Boolean  = true,
       description: Option[String] = None)
         
     private def processCommandLine(args: Seq[String]): Options = {
@@ -223,6 +224,9 @@ object Stash extends Command {
         
         reqd[String]("-m", "--message=<msg>",    "A short description of the stash")
           { (desc, options) => options.copy(description = Some(desc)) }
+        
+        flag("-n", "--no-revert",    "Do not revert the working copy.")
+          { _.copy(revertWorkingCopy = false) }
         
         flag("-h", "--help", "Show this message")
             { _ => println(help); throw HelpException() }
@@ -357,15 +361,17 @@ object Stash extends Command {
       // Put the new entry at the head of the list and save
       saveStashEntries(stash :: loadStashEntries())
       
-      // Lastly we revert the working copy.
-      // We will explicitly revert all entries to ensure that the --remove-added flag is honored.
-      // For added/unversioned directories we do not need to revert any entries below them
-      // as these entrie will be reverted recursively with their respective  directories.
-      val addedAndUnversionedDirs = items filter (i => i.isDir && (i.status == ADDED || i.status == UNVERSIONED))
-      val canSkip = (item: StashItem) => addedAndUnversionedDirs exists (d => item.path.startsWith(d.path) && item.path != d.path)
-      val revertPaths = items filterNot canSkip map (_.path)
-      val cmdLine = Seq("svn", "revert", "--remove-added", "--depth=infinity") ++ revertPaths
-      runCmd(cmdLine, Some(wcRoot.toFile))
+      if (options.revertWorkingCopy) {
+        // Lastly we revert the working copy.
+        // We will explicitly revert all entries to ensure that the --remove-added flag is honored.
+        // For added/unversioned directories we do not need to revert any entries below them
+        // as these entrie will be reverted recursively with their respective  directories.
+        val addedAndUnversionedDirs = items filter (i => i.isDir && (i.status == ADDED || i.status == UNVERSIONED))
+        val canSkip = (item: StashItem) => addedAndUnversionedDirs exists (d => item.path.startsWith(d.path) && item.path != d.path)
+        val revertPaths = items filterNot canSkip map (_.path)
+        val cmdLine = Seq("svn", "revert", "--remove-added", "--depth=infinity") ++ revertPaths
+        runCmd(cmdLine, Some(wcRoot.toFile))
+      }
         
       //  Let the user know we finished successfully
       println(s"Saved working copy state - ${stash.summary}")
