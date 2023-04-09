@@ -23,19 +23,18 @@ object Color {
   val GRAY   = "\u001b[90m"
   val RESET  = "\u001b[0m" 
       
-  private def withColor(color: String, str: String): String =
+  private def withColor(color: String)(str: String): String =
     if (useColor)
       s"${color}${str}${RESET}"
     else
       str
     
-  def red(str: String)    = withColor(RED, str)
-  def green(str: String)  = withColor(GREEN, str)
-  def yellow(str: String) = withColor(YELLOW, str)
-  def blue(str: String)   = withColor(BLUE, str)
-  def purple(str: String) = withColor(PURPLE, str)
-  def cyan(str: String)   = withColor(CYAN, str)
-  def white(str: String)  = withColor(WHITE, str)
-  def gray(str: String)   = withColor(GRAY, str)
-  def reset(str: String)  = withColor(RESET, str)
+  val red    = withColor(RED) _
+  val green  = withColor(GREEN) _
+  val yellow = withColor(YELLOW) _
+  val blue   = withColor(BLUE) _
+  val purple = withColor(PURPLE) _
+  val cyan   = withColor(CYAN) _
+  val white  = withColor(WHITE) _
+  val gray   = withColor(GRAY) _
 }

@@ -50,10 +50,10 @@ object Stash extends Command {
   private case class StashItem(path: String, revision: String, status: String, isDir: Boolean) {
     def pathDisplay = if (isDir) s"$path/" else path
     def pathColor = status match {
-      case ADDED       => green _
-      case DELETED     => red _
-      case MODIFIED    => purple _
-      case _           => white _
+      case ADDED       => green
+      case DELETED     => red
+      case MODIFIED    => purple
+      case _           => white
     }
     
     def statusDisplay = status match {

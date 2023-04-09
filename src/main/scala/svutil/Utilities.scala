@@ -206,10 +206,10 @@ object Utilities {
   case class LogPath(path: String, kind: String, action: String, textMods: Boolean, propMods: Boolean, fromPath: Option[FromPath]) {
     def formatted:String = {
       val color = action match {
-        case "D" => red _
-        case "A" => green _
-        case "M" => purple _
-        case _   => white _
+        case "D" => red
+        case "A" => green
+        case "M" => purple
+        case _   => white
       }
       val from = fromPath match {
         case Some(FromPath(path, revision)) => s"  (from ${path}:${revision})"
@@ -315,14 +315,14 @@ object Utilities {
   
   def printDiffLine(line: String): Unit = {
     val color: (String) => String = {
-      if      ((line startsWith "---") || (line startsWith "+++")) blue _
-      else if (line startsWith "Index:")                           yellow _
-      else if (line startsWith "==========")                       yellow _
-      else if (line startsWith "Property changes on:")             purple _
-      else if (line startsWith "+")                                green _
-      else if (line startsWith "@@")                               gray _
-      else if (line startsWith "-")                                red _
-      else                                                         white _ 
+      if      ((line startsWith "---") || (line startsWith "+++")) blue
+      else if (line startsWith "Index:")                           yellow
+      else if (line startsWith "==========")                       yellow
+      else if (line startsWith "Property changes on:")             purple
+      else if (line startsWith "+")                                green
+      else if (line startsWith "@@")                               gray
+      else if (line startsWith "-")                                red
+      else                                                         white
     }
 
     println(color(line))
