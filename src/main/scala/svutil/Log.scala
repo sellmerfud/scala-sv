@@ -26,13 +26,25 @@ object Log extends Command {
     reverse:   Boolean        = false,
     revisions: Vector[String] = Vector.empty,
     search:    Vector[Search] = Vector.empty,
+    regexes:   Vector[Regex]  = Vector.empty,
     paths:     Vector[String] = Vector.empty)
+
 
 
   private def processCommandLine(args: Seq[String]): Options = {
     import org.sellmerfud.optparse._
-  
+    import java.util.regex.PatternSyntaxException
+    
     val parser = new OptionParser[Options] {
+      
+      addArgumentParser[Regex] { arg =>
+        try   { new Regex(arg) }
+        catch { 
+          case e: PatternSyntaxException =>
+            throw new InvalidArgumentException(s"\n${e.getMessage}")
+        }
+      }
+      
       banner = s"usage: $scriptName $name [<options>] [ <path> | <url> [<path...] ]"
       separator("")
       separator(description)
@@ -76,6 +88,9 @@ object Log extends Command {
       flag("", "--stop-on-copy", "Do not cross copies while traversing history")
         { _.copy(noCopy = true) }
       
+      reqd[Regex]("-m", "--match=<regex>", "Limits commits to those with a message containing <regex>")
+        { (regex, options) => options.copy(regexes = options.regexes :+ regex) }
+        
       reqd[String]("-s", "--search=<glob>", "Limits commits to those with a message containing <glob>")
         { (glob, options) => options.copy(search = options.search :+ Search(glob, searchAnd = false)) }
       
@@ -102,9 +117,19 @@ object Log extends Command {
   def showResults(cmdLine: Seq[String], options: Options): Unit = {
     import scala.xml._
     
+    //  Filter the log entries to those that match any regular expressions
+    //  supplied by the user
+    def matching(entries: Seq[LogEntry]): Seq[LogEntry] =
+      if (options.regexes.isEmpty)
+        entries
+      else entries filter { entry =>
+        val msg = entry.msg.mkString("\n")
+        options.regexes exists (_.findFirstIn(msg).nonEmpty)
+      }
+        
     val logData = runCmd(cmdLine).mkString("\n")
     // Parse the XML log entries
-    val entries = (XML.loadString(logData) \ "logentry") map parseLogEntry
+    val entries = matching((XML.loadString(logData) \ "logentry") map parseLogEntry)
 
     // When showing incoming changes there is a possiblity that the BASE
     // revision already exists in the working directory.
