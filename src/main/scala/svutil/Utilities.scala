@@ -6,9 +6,7 @@ import java.time.format.DateTimeFormatter
 import scala.util.Properties.propOrElse
 import java.time._
 import java.io.File
-import os._
 import scala.xml._
-import Exec._
 import Color._
 
 object Utilities {
@@ -21,21 +19,20 @@ object Utilities {
   case class SuccessExit(message: String = "") extends Exception(message)
   
   def generalError(msg: String): Nothing = throw GeneralError(msg)
-  
   def successExit(msg: String): Nothing = throw SuccessExit(msg)
   
   implicit class StringWrapper(str: String) {
     def chomp(suffix: String = "\n"): String = suffix match {
       case null | "" => str
-      case "\n" if str.endsWith("\r\n") => str.reverse.drop(2).reverse.toString
-      case "\n" if str.endsWith("\r") || str.endsWith("\n") => str.reverse.drop(1).reverse.toString
-      case suf   if str.endsWith(suf) => str.reverse.drop(suf.length).reverse.toString
-      case _ => str
+      case "\n" if str.endsWith("\r\n")                     => str.slice(0, str.length - 2)
+      case "\n" if str.endsWith("\r") || str.endsWith("\n") => str.slice(0, str.length - 1)
+      case suf  if str.endsWith(suf)                        => str.slice(0, str.length - suf.length)
+      case _                                                => str
     }
     def isInteger = str forall (_.isDigit)
   }
 
-
+  // Join paths returned by svn commands
   def joinPaths(base: String, others: String*): String = {
     val result = new StringBuilder(base.chomp("/"))
     for (segment <- others)
@@ -82,14 +79,14 @@ object Utilities {
 
   //  Starting in the current working directory search for the top
   //  of the working copy.  The directory that contains the .svn directory.
-  def getWorkingCopyRoot(): Option[Path] = {
-      def findIt(path: Path): Option[Path] =
+  def getWorkingCopyRoot(): Option[os.Path] = {
+      def findIt(path: os.Path): Option[os.Path] =
         if (os.isDir(path / ".svn"))
           Some(path)
         else if (path.segmentCount == 0)
           None
         else
-          findIt(path / up)
+          findIt(path / os.up)
       
       // Start with the current working directory path
       findIt(os.pwd)
@@ -99,7 +96,7 @@ object Utilities {
   //  We create a .sv directory in the top directory of the working copy
   //  This gives sv commands a place to store data
   //  This will throw an error of the directory cannot be resloved.
-  def getDataDirectory(): Path = {
+  def getDataDirectory(): os.Path = {
     val wcRoot  = getWorkingCopyRoot() getOrElse {
       generalError(s"You must run this command from within a subversion working copy directory")
     }
@@ -347,7 +344,7 @@ object Utilities {
   // If the path argument is an absolute path, then the paths returned will also be absolute
   // If the path argument is a relative path, then the path of each entry will be relateive
   // to the givne path.
-  def getSvnStatus(path: String, cwd: Option[File]): SvnStatus = {
+  def getSvnStatus(path: String, cwd: Option[os.Path]): SvnStatus = {
     val cmdLine    = Seq("svn", "status", "--xml", path)
     val out        = runCmd(cmdLine, cwd)
     val targetNode = (XML.loadString(out.mkString("\n")) \ "target").head
@@ -365,6 +362,28 @@ object Utilities {
     }
     SvnStatus(targetNode.attributes("path").head.text, entries)
   }
+  
+  
+  case class ExecError(err: Int, stderr: Seq[String]) extends Exception("Exec Error")
+
+  implicit class CommandResultWrapper(r: os.CommandResult) {
+      def outString = new String(r.out.bytes)
+      def errString = new String(r.err.bytes)
+      def outSeq = outString.split("\n").toSeq
+      def errSeq = errString.split("\n").toSeq
+  }
+  
+  //  Execute the command and return the commands stdout
+  //  If the command fails, throw an ExecError
+  def runCmd(command: Seq[String], cwd: Option[os.Path] = None): Seq[String] = {
+    import os.Shellable._
+    val r = os.proc(command).call(cwd = cwd getOrElse null, check = false, stderr = os.Pipe)
+    if (r.exitCode == 0)
+      r.outSeq
+    else
+      throw ExecError(r.exitCode, r.errSeq)
+  }
+  
 }
 
 

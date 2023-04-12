@@ -4,16 +4,13 @@ package svutil
 
 import scala.util.matching.Regex
 import java.io.{ File, FileWriter, PrintWriter,  FileReader, BufferedReader }
-import java.nio.file.{ Files, Paths, Path => NioPath }
 import java.util.regex.PatternSyntaxException
 import java.time.LocalDateTime
 import java.util.UUID
 import scala.jdk.CollectionConverters._
-import os._
 import upickle.default.{ read, writeToOutputStream, ReadWriter => RW, macroRW, readwriter }
 import scala.xml._
 import org.sellmerfud.optparse._
-import Exec.runCmd
 import Color._
 import Utilities._
 
@@ -112,21 +109,20 @@ object Stash extends Command {
   }
    
   private def saveStashEntries(entries: List[StashEntry]): Unit = {
-    val ostream = os.write.over.outputStream(stashEntriesFile)
-    try writeToOutputStream(entries, ostream, indent = 2)
+    try {
+      val ostream = os.write.over.outputStream(stashEntriesFile)
+      try writeToOutputStream(entries, ostream, indent = 2)
+      finally ostream.close()
+    }
     catch {
       case e: Throwable =>
         generalError(s"Error saving stash entries ($stashEntriesFile): ${e.getMessage}")
     }
-    finally ostream.close()
-      
-    
-    
   }  
    
 
   //  Update the working copy by applying a stash entry
-  private def applyStash(stash: StashEntry, wcRoot: Path, dryRun: Boolean): Unit = {
+  private def applyStash(stash: StashEntry, wcRoot: os.Path, dryRun: Boolean): Unit = {
     val patchFile  = (stashPath / stash.patchName).toString
     val cmdLine  = if (dryRun) 
       Seq("svn", "patch", "--dry-run", patchFile)
@@ -134,7 +130,7 @@ object Stash extends Command {
       Seq("svn", "patch", patchFile)
 
     // First apply the patch
-    runCmd(cmdLine, Some(wcRoot.toIO)) foreach println
+    runCmd(cmdLine, Some(wcRoot)) foreach println
     
     if (!dryRun) {
       // The working copy has been restored via the patch, but and files that were
@@ -146,7 +142,7 @@ object Stash extends Command {
         val canSkip = (item: StashItem) => unversionedDirs exists (d => item.path.startsWith(d.path) && item.path != d.path)
         val revertPaths = unversionedItems filterNot canSkip map (_.path)
         val cmdLine = Seq("svn", "revert", "--depth=infinity") ++ revertPaths
-        runCmd(cmdLine, Some(wcRoot.toIO))        
+        runCmd(cmdLine, Some(wcRoot))        
       }
     
       //  Let the user know we finished successfully
@@ -193,9 +189,9 @@ object Stash extends Command {
     }
     
     
-    private def createPatchFile(wcRoot: Path, patchName: String): Unit = {
+    private def createPatchFile(wcRoot: os.Path, patchName: String): Unit = {
       val cmdLine = Seq("svn", "diff", "--depth=infinity", "--ignore-properties", ".")
-      val diffOut = runCmd(cmdLine, Some(wcRoot.toIO))
+      val diffOut = runCmd(cmdLine, Some(wcRoot))
       val file    = (stashPath / patchName).toIO
       
       try {
@@ -209,7 +205,7 @@ object Stash extends Command {
       }
     }
     
-    private def getLogMessage1st(wcRoot: Path): String = {
+    private def getLogMessage1st(wcRoot: os.Path): String = {
       val cmdLine = Seq("svn", "log", "--xml", "--revision=HEAD", wcRoot.toString)
       val out     = runCmd(cmdLine)
       val entries = (XML.loadString(out.mkString("\n")) \ "logentry") map parseLogEntry
@@ -228,7 +224,7 @@ object Stash extends Command {
     //  At this point `svn status` will return all of the previously unversioned items as
     //  "added" so we must mark them as unversioned in our own item list.
     //  So this function will alter the working copy when unversioned items are being stashed.
-    private def getStashItems(wcRoot: Path, unversioned: Boolean): List[StashItem] = {
+    private def getStashItems(wcRoot: os.Path, unversioned: Boolean): List[StashItem] = {
       
       //  We always filter out entries with item status of "normal".  These have only property changes.
       //  which we do not care about.
@@ -244,12 +240,12 @@ object Stash extends Command {
       
       // Get the status starting at the wcRoot to determine what is dirty and must be stashed
       def getWorkingCopyItems(): List[StashItem] = {
-        getSvnStatus(".", Some(wcRoot.toIO)).entries.toList filter included map toItem
+        getSvnStatus(".", Some(wcRoot)).entries.toList filter included map toItem
       }
       
       def addToWorkingCopy(paths: Seq[String]): Unit = {
         val cmdLine = Seq("svn", "add", "--depth=infinity", "--no-auto-props") ++ paths
-        runCmd(cmdLine, Some(wcRoot.toIO))        
+        runCmd(cmdLine, Some(wcRoot))        
       }
       
       
@@ -333,7 +329,7 @@ object Stash extends Command {
         val canSkip = (item: StashItem) => addedAndUnversionedDirs exists (d => item.path.startsWith(d.path) && item.path != d.path)
         val revertPaths = items filterNot canSkip map (_.path)
         val cmdLine = Seq("svn", "revert", "--remove-added", "--depth=infinity") ++ revertPaths
-        runCmd(cmdLine, Some(wcRoot.toIO))
+        runCmd(cmdLine, Some(wcRoot))
       }
         
       //  Let the user know we finished successfully

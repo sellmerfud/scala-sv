@@ -7,7 +7,6 @@ import java.util.regex.PatternSyntaxException
 import java.time._
 import scala.xml._
 import scala.util.{ Try, Success, Failure }
-import Exec.runCmd
 import Color._
 import Utilities._
 

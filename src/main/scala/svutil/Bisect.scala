@@ -10,8 +10,6 @@ import scala.xml._
 import scala.util.{ Try, Success, Failure }
 import upickle.default.{ read, writeToOutputStream, ReadWriter => RW, macroRW, readwriter }
 import org.sellmerfud.optparse._
-import os._
-import Exec._
 import Color._
 import Utilities._
 
@@ -83,7 +81,7 @@ object Bisect extends Command {
     if (os.isFile(bisectDataFile)) {
       try {
         val data = read[BisectData](bisectDataFile.toIO)
-        if (Path(data.localPath) != os.pwd)
+        if (os.Path(data.localPath) != os.pwd)
           generalError(s"$scriptName $name must be run from the same directory where the bisect session was started: ${data.localPath}")
         Some(data)
       }
@@ -97,13 +95,15 @@ object Bisect extends Command {
   }
   
   def saveBisectData(data: BisectData): Unit = {
-    val ostream = os.write.over.outputStream(bisectDataFile)
-    try writeToOutputStream(data, ostream, indent = 2)
+    try {
+      val ostream = os.write.over.outputStream(bisectDataFile)
+      try writeToOutputStream(data, ostream, indent = 2)
+      finally ostream.close()
+    }
     catch {
       case e: Throwable =>
         generalError(s"Error saving bisect data entries ($bisectDataFile): ${e.getMessage}")
     }
-    finally ostream.close()
   }  
     
   //  Load and return the bisect data or throw a general error
@@ -864,10 +864,19 @@ object Bisect extends Command {
         generalError(s"$cmdPrefix cannot be used until a '${initialData.termGoodName}' revision and '${initialData.termBadName}' revision have been supplied")
 
       def runCommand(): Unit = {
+        import os.Shellable._
+        
         val data = getBisectData()  // Get fresh data
 
         println(options.cmdArgs mkString " ")
-        val finished = exec(options.cmdArgs, None, new ConsoleExecLogger) match {
+        
+        val r = os.proc(options.cmdArgs).call(
+          check  = false,
+          stdin  = os.Inherit,
+          stdout = os.Inherit,
+          stderr = os.Inherit)
+                
+        val finished = r.exitCode match {
           case 0 =>
             displayBisectCommand(Seq(data.termGoodName))
             val complete = Good.markGoodRevision(getWorkingCopyInfo().commitRev)
@@ -1010,6 +1019,7 @@ object Bisect extends Command {
     }
 
     override def run(args: Seq[String]): Unit = {
+      import os.Shellable._
       val options = processCommandLine(args)
       
       options.logFile match {
@@ -1021,7 +1031,11 @@ object Bisect extends Command {
           
         case Some(file) =>
           val cmdLine = Seq("/bin/sh", "-c", file.toString)
-          exec(cmdLine, None, new ConsoleExecLogger)
+          os.proc(cmdLine).call(
+            check  = false,
+            stdin  = os.Inherit,
+            stdout = os.Inherit,
+            stderr = os.Inherit)
       }
     }
   }

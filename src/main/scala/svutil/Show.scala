@@ -5,7 +5,6 @@ package svutil
 import java.io.File
 import scala.util.matching.Regex
 import scala.xml._
-import Exec.{ runCmd, ExecError }
 import Color._
 import Utilities._
 

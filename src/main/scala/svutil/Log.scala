@@ -5,7 +5,6 @@ package svutil
 import scala.util.matching.Regex
 import java.time.LocalDateTime
 import Color._
-import Exec.runCmd
 import Utilities._
 
 object Log extends Command {

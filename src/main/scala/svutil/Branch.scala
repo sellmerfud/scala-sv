@@ -5,7 +5,6 @@ package svutil
 import scala.util.matching.Regex
 import java.util.regex.PatternSyntaxException
 import scala.xml._
-import Exec.runCmd
 import Color._
 import Utilities._
 
