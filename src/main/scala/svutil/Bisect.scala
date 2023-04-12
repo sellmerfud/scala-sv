@@ -3,14 +3,14 @@
 package svutil
 
 import java.io.{ File, FileWriter, PrintWriter,  FileReader, BufferedReader }
-import java.nio.file.{ Files, Paths, Path }
 import java.time._
 import scala.xml._
 import scala.jdk.CollectionConverters._
 import scala.xml._
 import scala.util.{ Try, Success, Failure }
-import com.typesafe.config._
+import upickle.default.{ read, writeToOutputStream, ReadWriter => RW, macroRW, readwriter }
 import org.sellmerfud.optparse._
+import os._
 import Exec._
 import Color._
 import Utilities._
@@ -25,6 +25,9 @@ object Bisect extends Command {
   val RevisionOrdering: Ordering[String] = Ordering.by { revision => -revision.toInt }
 
   case class ExtantEntry(revision: String, msg1st: String)
+  private object ExtantEntry {
+    implicit val rw: RW[ExtantEntry] = macroRW  
+  }
   
   private case class BisectData(
     localPath:   String,
@@ -57,6 +60,11 @@ object Bisect extends Command {
     def getLogMsg(revision: String) = extantRevs find (_.revision == revision) map (_.msg1st) getOrElse ""
   }
   
+  
+  private object BisectData {
+    implicit val rw: RW[BisectData] = macroRW  
+  }
+  
   //  Try to limit the revs to only those in the cadidate list
   //  If the data is not ready then just return the whole set
   def candidatesOnly(data: BisectData, revisions: Set[String]): Set[String] = {
@@ -67,92 +75,37 @@ object Bisect extends Command {
     else
       revisions
   }
-  
-  
-  //  Convert our BisectData to a Config value that can be saved to disk.
-  private def toConfigObject(data: BisectData): ConfigObject = {
-    
-    def toExtantConfig(entry: ExtantEntry): ConfigValue = {
-      ConfigValueFactory.fromMap(Map("revision" -> entry.revision, "msg1st" -> entry.msg1st).asJava)
-    }
-    
-    ConfigValueFactory.fromMap(Map(
-      "localPath"   -> data.localPath,
-      "originalRev" -> data.originalRev,
-      "startMaxRev" -> data.startMaxRev.getOrElse(null),
-      "startMinRev" -> data.startMinRev.getOrElse(null),
-      "maxRev"      -> data.maxRev.getOrElse(null),
-      "minRev"      -> data.minRev.getOrElse(null),
-      "extantRevs"  -> ConfigValueFactory.fromIterable(data.extantRevs.map(toExtantConfig).asJava),
-      "skipped"     -> ConfigValueFactory.fromIterable(data.skipped.asJava),
-      "termBad"     -> data.termBad.getOrElse(null),
-      "termGood"    -> data.termGood.getOrElse(null),
-    ).asJava)
-  }
-  
-  private def fromConfig(cfg: Config) = {
-    def toExtantEntry(cfg: Config): ExtantEntry = {
-      ExtantEntry(cfg.getString("revision"), cfg.getString("msg1st"))
-    }
-    
-    BisectData(
-      cfg.getString("localPath"),
-      cfg.getString("originalRev"),
-      cfg.optString("startMaxRev"),
-      cfg.optString("startMinRev"),
-      cfg.optString("maxRev"),
-      cfg.optString("minRev"),
-      cfg.getConfigList("extantRevs").asScala.toSeq map toExtantEntry,
-      cfg.getStringList("skipped").asScala.toSet,
-      cfg.optString("termBad"),
-      cfg.optString("termGood"),
-    )
-  }
-
       
-  private def bisectDataFile = getDataDirectory().resolve("sv_bisect_data.json").toFile
-  private def bisectLogFile  = getDataDirectory().resolve("sv_bisect_log").toFile
-    
+  private def bisectDataFile = getDataDirectory() / "sv_bisect_data.json"
+  private def bisectLogFile  = getDataDirectory() / "sv_bisect_log"
     
   private def loadBisectData(): Option[BisectData] = {
-    val dataFile = bisectDataFile
-    
-    if (dataFile.isFile && dataFile.canRead) {
+    if (os.isFile(bisectDataFile)) {
       try {
-        val config = ConfigFactory.parseFile(dataFile, ConfigParseOptions.defaults.setSyntax(ConfigSyntax.JSON))
-        val data   = fromConfig(config)
-        val cwd    = Paths.get("").toAbsolutePath
-        if (cwd.toString != data.localPath)
+        val data = read[BisectData](bisectDataFile.toIO)
+        if (Path(data.localPath) != os.pwd)
           generalError(s"$scriptName $name must be run from the same directory where the bisect session was started: ${data.localPath}")
         Some(data)
       }
       catch {
         case e: Throwable => 
-          generalError(s"Error reading bisect data ($dataFile): ${e.getMessage}")
+          generalError(s"Error reading bisect data ($bisectDataFile): ${e.getMessage}")
       }
-    }
-    else if (dataFile.isFile) {
-      generalError(s"Unable to read bisect data ($dataFile): Check file permissions")
     }
     else
       None
   }
   
   def saveBisectData(data: BisectData): Unit = {
-    val dataFile = bisectDataFile
-    try {
-      val opts   = ConfigRenderOptions.concise.setJson(true).setFormatted(true)
-      val writer = new FileWriter(dataFile)
-      writer.write(toConfigObject(data).toConfig.root.render(opts))
-      writer.close
-    } 
+    val ostream = os.write.over.outputStream(bisectDataFile)
+    try writeToOutputStream(data, ostream, indent = 2)
     catch {
       case e: Throwable =>
-        generalError(s"Error saving bisect data ($dataFile): ${e.getMessage}")
+        generalError(s"Error saving bisect data entries ($bisectDataFile): ${e.getMessage}")
     }
+    finally ostream.close()
   }  
-  
-  
+    
   //  Load and return the bisect data or throw a general error
   //  if the data file is missing.
   private def getBisectData(): BisectData = {
@@ -162,31 +115,15 @@ object Bisect extends Command {
   }
   
   private def appendToBisectLog(msg: String): Unit = {
-    try {
-      val writer = new PrintWriter(new FileWriter(bisectLogFile, true), true)
-      writer.println(msg)
-      writer.close()
-    }
-    catch {
+    try os.write.append(bisectLogFile, msg + "\n")
+      catch {
       case e: Throwable =>
         generalError(s"Error appending to bisect log ($bisectLogFile): ${e.getMessage}")
     }
   }
   
   private def displayBisectLog(): Unit = {
-    def read1Line(reader: BufferedReader): Unit =
-        reader.readLine match {
-          case null => // Reached eof
-          case line =>
-            System.out.println(line)
-            read1Line(reader)
-        }
-        
-    try {
-      val reader = new BufferedReader(new FileReader(bisectLogFile))
-      read1Line(reader)
-      reader.close()
-    }
+    try os.read.lines.stream(bisectLogFile) foreach (println(_))
     catch {
       case e: Throwable =>
         generalError(s"Error reading bisect log ($bisectLogFile): ${e.getMessage}")
@@ -433,7 +370,6 @@ object Bisect extends Command {
 
     override def run(args: Seq[String]): Unit = {
       val options = processCommandLine(args)
-      val cwd     = Paths.get("").toAbsolutePath
       
       //  Ensure that we are in a directory that is part of a subverion working copy
       getWorkingCopyRoot() getOrElse {
@@ -469,7 +405,7 @@ object Bisect extends Command {
           
           // save the bisect data in order to start a new session.
           val data = BisectData(
-            localPath   = cwd.toString,
+            localPath   = os.pwd.toString,
             originalRev = getWorkingCopyInfo().commitRev,
             maxRev      = maxRev,
             minRev      = minRev,
@@ -480,11 +416,11 @@ object Bisect extends Command {
             termGood    = options.termGood)
             
           saveBisectData(data)
-          bisectLogFile.delete()  // Remove any previous log file.
+          os.remove(bisectLogFile) // Remove any previous log file.
 
           appendToBisectLog("#!/usr/bin/env sh")
           appendToBisectLog(s"# $scriptName $name log file  ${displayDateTime(LocalDateTime.now)}")
-          appendToBisectLog(s"# Initiated from: $cwd")
+          appendToBisectLog(s"# Initiated from: ${os.pwd.toString}")
           appendToBisectLog(s"# ----------------------------")
           data.maxRev foreach (r => logBisectRevision(r, data.termBadName, get1stLogMessage(r, Some(data))))
           data.minRev foreach (r => logBisectRevision(r, data.termGoodName, get1stLogMessage(r, Some(data))))
@@ -1013,8 +949,8 @@ object Bisect extends Command {
       }
         
       //  Remove the data file, this will clear the bisect session
-      bisectDataFile.delete()
-      bisectLogFile.delete()
+      os.remove(bisectDataFile)
+      os.remove(bisectLogFile)
     }
   }
   

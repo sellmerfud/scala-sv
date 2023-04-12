@@ -3,11 +3,10 @@ package svutil
 
 import java.util.Locale
 import java.time.format.DateTimeFormatter
-import java.nio.file.{ Files, Paths, Path }
 import scala.util.Properties.propOrElse
 import java.time._
 import java.io.File
-import com.typesafe.config.Config
+import os._
 import scala.xml._
 import Exec._
 import Color._
@@ -37,11 +36,6 @@ object Utilities {
   }
 
 
-  implicit class ConfigWrapper(cfg: Config) {
-    def optString(path: String): Option[String] = if (cfg.getIsNull(path)) None else Some(cfg.getString(path))
-  }
-    
-  
   def joinPaths(base: String, others: String*): String = {
     val result = new StringBuilder(base.chomp("/"))
     for (segment <- others)
@@ -89,18 +83,16 @@ object Utilities {
   //  Starting in the current working directory search for the top
   //  of the working copy.  The directory that contains the .svn directory.
   def getWorkingCopyRoot(): Option[Path] = {
-
       def findIt(path: Path): Option[Path] =
-        if (path == null)
+        if (os.isDir(path / ".svn"))
+          Some(path)
+        else if (path.segmentCount == 0)
           None
-        else 
-          path.resolve(".svn").toFile match {
-            case svn if svn.isDirectory => Some(path)
-            case _                      => findIt(path.getParent)
-          }
+        else
+          findIt(path / up)
       
       // Start with the current working directory path
-      findIt(Paths.get("").toAbsolutePath)
+      findIt(os.pwd)
   }
   
   
@@ -112,11 +104,22 @@ object Utilities {
       generalError(s"You must run this command from within a subversion working copy directory")
     }
     
-    val dotSVDir = wcRoot.resolve( ".sv").toFile
-    if (dotSVDir.isDirectory || dotSVDir.mkdir())
-      dotSVDir.toPath
-    else
-      generalError(s"Unable to create the .sv directory in your working copy")
+    try {
+      val dotSVDir = wcRoot / ".sv"
+      if (!os.isDir(dotSVDir)) {
+        try os.makeDir(dotSVDir)
+        catch {
+          case e: java.io.IOException =>
+            generalError(s"Cannot create .sv directory: ${e.getMessage}")
+        }
+      }
+      dotSVDir
+    }
+    catch {
+      case e: java.io.IOException =>
+        val msg = if (e.getMessage == null) "" else s": ${e.getMessage}"
+        generalError(s"Unable to create the .sv directory in your working copy$msg")
+    }
   }
   
 

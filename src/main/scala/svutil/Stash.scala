@@ -4,12 +4,13 @@ package svutil
 
 import scala.util.matching.Regex
 import java.io.{ File, FileWriter, PrintWriter,  FileReader, BufferedReader }
-import java.nio.file.{ Files, Paths, Path }
+import java.nio.file.{ Files, Paths, Path => NioPath }
 import java.util.regex.PatternSyntaxException
 import java.time.LocalDateTime
 import java.util.UUID
 import scala.jdk.CollectionConverters._
-import com.typesafe.config._
+import os._
+import upickle.default.{ read, writeToOutputStream, ReadWriter => RW, macroRW, readwriter }
 import scala.xml._
 import org.sellmerfud.optparse._
 import Exec.runCmd
@@ -66,6 +67,10 @@ object Stash extends Command {
     // ADDED and UNVERSIONED will have a revision of -1
     def revisionDisplay = if (revision == "-1") "" else s"[${yellow(revision)}]"
   }
+
+  private object StashItem {
+    implicit val rw: RW[StashItem] = macroRW  
+  }
   
   private case class StashEntry(
     branch: String,        // branch from which the stash was created (trunk, 8.1, etc.)
@@ -78,107 +83,58 @@ object Stash extends Command {
       def summary = s"${green(branch)}[${yellow(revision)}]: $description"
     }
 
-  private def stashPath         = getDataDirectory().resolve("stash")
-  private def stashEntriesFile  = stashPath.resolve("stash_entries.json").toFile
+  private object StashEntry {
+    implicit val rw: RW[StashEntry] = macroRW  
+  }
+  
+  
+  //  Custom pickler for LocalDateTime
+  
+  implicit val localDateTimePickler: RW[LocalDateTime] = readwriter[String].bimap[LocalDateTime](
+    ldt => toISODateString(ldt),
+    str => parseISODate(str)
+  )
+  
+  private def stashPath         = getDataDirectory() / "stash"
+  private def stashEntriesFile  = stashPath / "stash_entries.json"
   private def createPatchName() = s"${UUID.randomUUID}.patch"
 
-  private def toConfigObject(stashEntries: Seq[StashEntry]): ConfigObject = {
-
-    def itemToConfig(item: StashItem): ConfigObject =
-      ConfigValueFactory.fromMap(Map(
-        "path" -> item.path,
-        "revision" -> item.revision,
-        "status"   -> item.status,
-        "isDir"    -> item.isDir
-      ).asJava)
-    
-    
-    def entryToConfig(entry: StashEntry): ConfigObject =
-      ConfigValueFactory.fromMap(Map(
-        "branch"      -> entry.branch,
-        "revision"    -> entry.revision,
-        "description" -> entry.description,
-        "date"        -> toISODateString(entry.date),
-        "patchName"   -> entry.patchName,
-        "items"       -> ConfigValueFactory.fromIterable(entry.items.map(itemToConfig).asJava)
-      ).asJava)
-      
-    ConfigValueFactory.fromMap(Map(
-      "entries" -> ConfigValueFactory.fromIterable(stashEntries.map(entryToConfig).asJava)
-    ).asJava)
-  }
-  
-  private def fromConfig(cfg: Config): List[StashEntry] = {
-    
-    def toStashItem(cfg: Config): StashItem = 
-      StashItem(
-        cfg.getString("path"),
-        cfg.getString("revision"),
-        cfg.getString("status"),
-        cfg.getBoolean("isDir")
-      )
-      
-    def toStashEntry(cfg: Config): StashEntry =
-      StashEntry(
-        cfg.getString("branch"),
-        cfg.getString("revision"),
-        cfg.getString("description"),
-        parseISODate(cfg.getString("date")),
-        cfg.getString("patchName"),
-        cfg.getConfigList("items").asScala.toSeq map toStashItem
-      )
-  
-      cfg.getConfigList("entries").asScala.toList map toStashEntry
-  }
-
-  // .sv/stash
-  // .sv/stash/entries.json
-  // .sv/stash/entryname.diff...
   private def loadStashEntries(): List[StashEntry] = {
-    val file = stashEntriesFile
-    
-    if (file.isFile && file.canRead) {
-      try {
-        val config = ConfigFactory.parseFile(file, ConfigParseOptions.defaults.setSyntax(ConfigSyntax.JSON))
-        fromConfig(config)
-      }
+    if (os.isFile(stashEntriesFile)) {
+      try read[List[StashEntry]](stashEntriesFile.toIO)
       catch {
         case e: Throwable => 
-          generalError(s"Error reading stash entries ($file): ${e.getMessage}")
+          generalError(s"Error reading stash entries ($stashEntriesFile): ${e.getMessage}")
       }
-    }
-    else if (file.exists) {
-      generalError(s"Unable to read stash entries ($file): Check file permissions")
     }
     else
       Nil
   }
    
   private def saveStashEntries(entries: List[StashEntry]): Unit = {
-    val file = stashEntriesFile
-    try {
-      val opts   = ConfigRenderOptions.concise.setJson(true).setFormatted(true)
-      val writer = new FileWriter(file)
-      writer.write(toConfigObject(entries).toConfig.root.render(opts))
-      writer.close
-    } 
+    val ostream = os.write.over.outputStream(stashEntriesFile)
+    try writeToOutputStream(entries, ostream, indent = 2)
     catch {
       case e: Throwable =>
-        generalError(s"Error saving stash entries ($file): ${e.getMessage}")
+        generalError(s"Error saving stash entries ($stashEntriesFile): ${e.getMessage}")
     }
+    finally ostream.close()
+      
+    
+    
   }  
    
 
   //  Update the working copy by applying a stash entry
   private def applyStash(stash: StashEntry, wcRoot: Path, dryRun: Boolean): Unit = {
-    val patchFile  = stashPath.resolve(stash.patchName).toString
+    val patchFile  = (stashPath / stash.patchName).toString
     val cmdLine  = if (dryRun) 
       Seq("svn", "patch", "--dry-run", patchFile)
     else
       Seq("svn", "patch", patchFile)
 
     // First apply the patch
-    runCmd(cmdLine, Some(wcRoot.toFile)) foreach println
+    runCmd(cmdLine, Some(wcRoot.toIO)) foreach println
     
     if (!dryRun) {
       // The working copy has been restored via the patch, but and files that were
@@ -190,7 +146,7 @@ object Stash extends Command {
         val canSkip = (item: StashItem) => unversionedDirs exists (d => item.path.startsWith(d.path) && item.path != d.path)
         val revertPaths = unversionedItems filterNot canSkip map (_.path)
         val cmdLine = Seq("svn", "revert", "--depth=infinity") ++ revertPaths
-        runCmd(cmdLine, Some(wcRoot.toFile))        
+        runCmd(cmdLine, Some(wcRoot.toIO))        
       }
     
       //  Let the user know we finished successfully
@@ -239,8 +195,8 @@ object Stash extends Command {
     
     private def createPatchFile(wcRoot: Path, patchName: String): Unit = {
       val cmdLine = Seq("svn", "diff", "--depth=infinity", "--ignore-properties", ".")
-      val diffOut = runCmd(cmdLine, Some(wcRoot.toFile))
-      val file    = stashPath.resolve(patchName).toFile
+      val diffOut = runCmd(cmdLine, Some(wcRoot.toIO))
+      val file    = (stashPath / patchName).toIO
       
       try {
         val writer = new PrintWriter(new FileWriter(file), true)
@@ -282,18 +238,18 @@ object Stash extends Command {
         e.itemStatus != NORMAL && (e.itemStatus != UNVERSIONED || unversioned)
         
       val toItem = (entry: StatusEntry) => {
-        val isDir = wcRoot.resolve(entry.path).toFile.isDirectory
+        val isDir = os.isDir(wcRoot / entry.path)
         StashItem(entry.path, entry.revision, entry.itemStatus, isDir)
       }
       
       // Get the status starting at the wcRoot to determine what is dirty and must be stashed
       def getWorkingCopyItems(): List[StashItem] = {
-        getSvnStatus(".", Some(wcRoot.toFile)).entries.toList filter included map toItem
+        getSvnStatus(".", Some(wcRoot.toIO)).entries.toList filter included map toItem
       }
       
       def addToWorkingCopy(paths: Seq[String]): Unit = {
         val cmdLine = Seq("svn", "add", "--depth=infinity", "--no-auto-props") ++ paths
-        runCmd(cmdLine, Some(wcRoot.toFile))        
+        runCmd(cmdLine, Some(wcRoot.toIO))        
       }
       
       
@@ -347,7 +303,14 @@ object Stash extends Command {
       val description        = options.description getOrElse getLogMessage1st(wcRoot)
       
       val patchName = createPatchName()
-      stashPath.toFile.mkdir()  // Make sure stash directory exists
+      if (!os.isDir(stashPath)) {
+        try os.makeDir(stashPath)
+        catch {
+          case e: java.io.IOException =>
+            generalError(s"Cannot create .sv/stash directory: ${e.getMessage}")
+        }
+      }
+      
       createPatchFile(wcRoot, patchName)
       
       val stash = StashEntry(
@@ -370,7 +333,7 @@ object Stash extends Command {
         val canSkip = (item: StashItem) => addedAndUnversionedDirs exists (d => item.path.startsWith(d.path) && item.path != d.path)
         val revertPaths = items filterNot canSkip map (_.path)
         val cmdLine = Seq("svn", "revert", "--remove-added", "--depth=infinity") ++ revertPaths
-        runCmd(cmdLine, Some(wcRoot.toFile))
+        runCmd(cmdLine, Some(wcRoot.toIO))
       }
         
       //  Let the user know we finished successfully
@@ -447,27 +410,7 @@ object Stash extends Command {
 
       parser.parse(args, Options())
     }
-    
-    def printPatchFile(path: Path): Unit = {
-      def read1Line(reader: BufferedReader): Unit =
-          reader.readLine match {
-            case null => // Reached eof
-            case line =>
-              printDiffLine(line)
-              read1Line(reader)
-          }
         
-      try {
-        val reader = new BufferedReader(new FileReader(path.toFile))
-        read1Line(reader)
-        reader.close()
-      }
-      catch {
-        case e: Throwable =>
-          generalError(s"Error reading patch file ($path): ${e.getMessage}")
-      }
-    }
-    
     override def run(args: Seq[String]): Unit = {
       val options    = processCommandLine(args)
       val wcInfo     = getWorkingCopyInfo()  // Make sure the current directory is in a subversion working copy
@@ -480,19 +423,18 @@ object Stash extends Command {
         generalError(s"stash-$index does not exist in the stash")
       
       // We show paths relative to the user current working directory
-      val cwd          = Paths.get("").toAbsolutePath
-      val pathPrefix   = cwd.relativize(wcRoot)
-      val relStashPath = cwd.relativize(stashPath)
+      val pathPrefix   = os.pwd relativeTo wcRoot
+      val relStashPath = os.pwd relativeTo stashPath
       
       println(s"stash     : ${stash.summary}")
       println(s"created   : ${purple(displayDateTime(stash.date))}")
-      println(s"patch file: ${blue(relStashPath.resolve(stash.patchName).toString)}")
+      println(s"patch file: ${blue((relStashPath / stash.patchName).toString)}")
       println("-" * 70)
       for (item <- stash.items)
-        println(s"${item.statusDisplay} ${item.pathColor(pathPrefix.resolve(item.pathDisplay).toString)} ${item.revisionDisplay}")
+        println(s"${item.statusDisplay} ${item.pathColor((pathPrefix / item.pathDisplay).toString)} ${item.revisionDisplay}")
       if (options.showDiff) {
         println()
-        printPatchFile(stashPath.resolve(stash.patchName))
+        os.read.lines.stream(stashPath / stash.patchName) foreach (printDiffLine(_))
       }
     }
   }
@@ -549,7 +491,7 @@ object Stash extends Command {
       if (!options.dryRun) {
         // remove the patch file
         // Remove the stash entry and save
-        stashPath.resolve(stash.patchName).toFile.delete()
+        os.remove(stashPath / stash.patchName)
         saveStashEntries(stashList filterNot (_ == stash))
         println(s"Dropped stash -  ${stash.summary}")        
       }
@@ -652,7 +594,7 @@ object Stash extends Command {
       
       // remove the patch file
       // Remove the stash entry and save
-      stashPath.resolve(stash.patchName).toFile.delete()
+      os.remove(stashPath / stash.patchName)
       saveStashEntries(stashList filterNot (_ == stash))
       println(s"Droped ${stash.summary}")
     }
@@ -688,9 +630,9 @@ object Stash extends Command {
 
       // remove each patch file
       for (stash <- loadStashEntries())
-        stashPath.resolve(stash.patchName).toFile.delete()
+        os.remove(stashPath / stash.patchName)
       // Remove the stash entries file
-      stashEntriesFile.delete()
+      os.remove(stashEntriesFile)
     }
   }
   
