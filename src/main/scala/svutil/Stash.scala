@@ -47,12 +47,6 @@ object Stash extends Command {
   // status will be one of: deleted, modified, added, unversioned
   private case class StashItem(path: String, revision: String, status: String, isDir: Boolean) {
     def pathDisplay = if (isDir) s"$path/" else path
-    def pathColor = status match {
-      case ADDED       => green
-      case DELETED     => red
-      case MODIFIED    => purple
-      case _           => white
-    }
     
     def statusDisplay = status match {
       case UNVERSIONED => "?" 
@@ -123,14 +117,37 @@ object Stash extends Command {
 
   //  Update the working copy by applying a stash entry
   private def applyStash(stash: StashEntry, wcRoot: os.Path, dryRun: Boolean): Unit = {
-    val patchFile  = (stashPath / stash.patchName).toString
-    val cmdLine  = if (dryRun) 
+    val pathMatch = """([ADUCG>])(\s+)(.+)""".r
+    val relWcRoot = wcRoot.relativeTo(os.pwd)
+    val relCwd    = os.pwd.relativeTo(wcRoot)
+    val patchFile = (stashPath / stash.patchName).toString
+    val cmdLine   = if (dryRun) 
       Seq("svn", "patch", "--dry-run", patchFile)
     else
       Seq("svn", "patch", patchFile)
 
+    var lastStatus = ""
     // First apply the patch
-    runCmd(cmdLine, Some(wcRoot)) foreach println
+    runCmd(cmdLine, Some(wcRoot)) foreach { 
+      case pathMatch(st, space, pathString) =>
+        val relPath = if (st == ">")
+          pathString  // Not a path 
+        else {
+          val path    = os.RelPath(pathString)
+          if (path.startsWith(relCwd)) path.relativeTo(relCwd) else relWcRoot / path
+        }
+        val color = st match {
+          case "C" => red
+          case "G" => purple
+          case ">" if lastStatus == "C" => red
+          case ">" if lastStatus == "G" => purple
+          case _   => white
+        }
+        println(color(s"$st$space$relPath"))
+        lastStatus = st
+      case other =>
+        println(other)
+    }
     
     if (!dryRun) {
       // The working copy has been restored via the patch, but and files that were
@@ -234,7 +251,7 @@ object Stash extends Command {
         e.itemStatus != NORMAL && (e.itemStatus != UNVERSIONED || unversioned)
         
       val toItem = (entry: StatusEntry) => {
-        val isDir = os.isDir(wcRoot / entry.path)
+        val isDir = os.isDir(wcRoot / os.RelPath(entry.path))
         StashItem(entry.path, entry.revision, entry.itemStatus, isDir)
       }
       
@@ -419,15 +436,20 @@ object Stash extends Command {
         generalError(s"stash-$index does not exist in the stash")
       
       // We show paths relative to the user current working directory
-      val pathPrefix   = os.pwd relativeTo wcRoot
-      val relStashPath = os.pwd relativeTo stashPath
-      
+      val relStashPath = stashPath.relativeTo(os.pwd)
+      val relWcRoot    = wcRoot.relativeTo(os.pwd)
+      val relCwd       = os.pwd.relativeTo(wcRoot)
       println(s"stash     : ${stash.summary}")
       println(s"created   : ${purple(displayDateTime(stash.date))}")
       println(s"patch file: ${blue((relStashPath / stash.patchName).toString)}")
       println("-" * 70)
-      for (item <- stash.items)
-        println(s"${item.statusDisplay} ${item.pathColor((pathPrefix / item.pathDisplay).toString)} ${item.revisionDisplay}")
+      for (item <- stash.items) {
+        // If the item is in the current working directory then strip the directory
+        // otherwise show it relative to the working copy root
+        val itemPath    = os.RelPath(item.pathDisplay)
+        val itemRelPath = if (itemPath.startsWith(relCwd)) itemPath.relativeTo(relCwd) else relWcRoot / itemPath
+        println(s"${item.statusDisplay} ${itemRelPath.toString} ${item.revisionDisplay}")
+      }
       if (options.showDiff) {
         println()
         os.read.lines.stream(stashPath / stash.patchName) foreach (printDiffLine(_))
