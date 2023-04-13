@@ -21,6 +21,7 @@ object Stash extends Command {
 
   private sealed trait StashCommand {
     val cmdName: String
+    val description: String
     def run(args: Seq[String]): Unit
   }
 
@@ -171,6 +172,7 @@ object Stash extends Command {
   // == Push Command ====================================================
   private case object Push extends StashCommand {
     override val cmdName = "push"
+    override val description = "Push working copy to the stash and revert the working copy"
       
     // sv stash [push] [-u|--include-unversioned] [-d|--description=<desc>]
     private case class Options(
@@ -185,7 +187,7 @@ object Stash extends Command {
         
         banner = s"usage: $cmdPrefix [<options]"
         separator("")
-        separator("Push working copy copy to the stash and revert the working copy")
+        separator(description)
         separator("Options:")
 
         flag("-u", "--unversioned", "Include unversioned files in the stash")
@@ -358,7 +360,8 @@ object Stash extends Command {
   // == List Command ====================================================
   private case object List extends StashCommand {
     override val cmdName = "list"
-      
+    override val description = "Display stash entries"
+    
     private def processCommandLine(args: Seq[String]): Unit = {
 
       val parser = new OptionParser[Unit] {
@@ -366,7 +369,7 @@ object Stash extends Command {
         
         banner = s"usage: $cmdPrefix [<options]"
         separator("")
-        separator("Display stash entries")
+        separator(description)
         separator("Options:")
 
         flag("-h", "--help", "Show this message")
@@ -391,6 +394,7 @@ object Stash extends Command {
   // == Show Command ====================================================
   private case object Show extends StashCommand {
     override val cmdName = "show"
+    override val description = "Show the details of a stash entry"
       
     private case class Options(
       stashIndex: Option[Int] = None,
@@ -406,7 +410,7 @@ object Stash extends Command {
         
         banner = s"usage: $cmdPrefix [<options]"
         separator("")
-        separator("Show the details of a stash entry")
+        separator(description)
         separator("Options:")
 
         flag("-d", "--diff", "Display the patch file differences")
@@ -460,7 +464,8 @@ object Stash extends Command {
   // == Pop Command ====================================================
   private case object Pop extends StashCommand {
     override val cmdName = "pop"
-      
+    override val description = "Remove a stash entry and apply it to the working copy"
+    
     // sv stash apply [<stash-ref>]
     private case class Options(
       stashIndex: Option[Int] = None,
@@ -475,7 +480,7 @@ object Stash extends Command {
         
         banner = s"usage: $cmdPrefix [<options] [<stash-ref>]"
         separator("")
-        separator("Remove a stash entry and apply it to the working copy")
+        separator(description)
         separator("Options:")
 
         flag("-n", "--dry-run", "Show the patch output but do not update the working copy",  "or remove the stash entry")
@@ -519,6 +524,7 @@ object Stash extends Command {
   // == Apply Command ====================================================
   private case object Apply extends StashCommand {
     override val cmdName = "apply"
+    override val description = "Apply a stash entry to the working copy"
       
     // sv stash apply [<stash-ref>]
     private case class Options(
@@ -534,7 +540,7 @@ object Stash extends Command {
         
         banner = s"usage: $cmdPrefix [<options] [<stash-ref>]"
         separator("")
-        separator("Apply a stash entry to the working copy")
+        separator(description)
         separator("Options:")
 
         flag("-n", "--dry-run", "Show the patch output but do not update the working copy")
@@ -571,6 +577,7 @@ object Stash extends Command {
   // == Drop Command ====================================================
   private case object Drop extends StashCommand {
     override val cmdName = "drop"
+    override val description = "Remove a stash entry"
       
     // sv stash apply [<stash-ref>]
     private case class Options(stashIndex: Option[Int] = None)
@@ -584,7 +591,7 @@ object Stash extends Command {
         
         banner = s"usage: $cmdPrefix [<options] [<stash-ref>]"
         separator("")
-        separator("Remove a stash entry")
+        separator(description)
         separator("Options:")
 
         flag("-h", "--help", "Show this message")
@@ -621,6 +628,7 @@ object Stash extends Command {
   // == Clear Command ====================================================
   private case object Clear extends StashCommand {
     override val cmdName = "clear"
+    override val description = "Remove all stash entries"
       
     private def processCommandLine(args: Seq[String]): Unit = {
 
@@ -631,7 +639,7 @@ object Stash extends Command {
         
         banner = s"usage: $cmdPrefix [<options]"
         separator("")
-        separator(s"Remove all stash entries")
+        separator(description)
         separator("Options:")
 
         flag("-h", "--help", "Show this message")
@@ -654,27 +662,25 @@ object Stash extends Command {
     }
   }
   
+  private val stashCommands = Push::List::Pop::Apply::Drop::Show::Clear::Nil
+
      
   private def showHelp(): Nothing = {
     val sv = scriptName
-    val help = s"""|Stash local changes to your working copy so that you can work on something else
-                   |and merge the changes back into your working copy at a later time.
-                   |
-                   |Available stash commands:
-                   |$sv $name push    Push working copy copy to the stash and revert the working copy
-                   |$sv $name pop     Remove a stash entry and apply it to the working copy
-                   |$sv $name list    Display stash entries
-                   |$sv $name show    Show the details of a stash entry
-                   |$sv $name apply   Apply a stash entry to the working copy
-                   |$sv $name drop    Remove a stash entry
-                   |$sv $name clear   Remove all stash entries
-                   |
-                   |Type '$sv $name <command> --help' for details on a specific command""".stripMargin
-      println(help)
-      throw HelpException()
+    val help1 = s"""|$description
+                    |Save local changes to your working copy so that you can work on something else
+                    |and merge the changes back into your working copy at a later time.
+                    |
+                    |Available stash commands:""".stripMargin
+    val help2 = s"""|
+                    |Type '$sv $name <command> --help' for details on a specific command""".stripMargin
+                    
+    println(help1)
+    for (c <- stashCommands)
+      println(f"$sv ${c.cmdName}%-8s  ${c.description}")
+    println(help2)
+    throw HelpException()
   }
-
-  private val stashCommands = Push::List::Pop::Apply::Drop::Show::Clear::Nil
 
   private def matchCommand(cmdName: String, cmdList: List[StashCommand]): List[StashCommand] = {
     if ("""^[a-zA-Z][-a-zA-Z0-9_]*""".r matches cmdName)
@@ -685,9 +691,13 @@ object Stash extends Command {
 
   private def getStashCommand(cmdName: String): StashCommand = {
     matchCommand(cmdName, stashCommands) match {
-      case Nil        => showHelp()
-      case cmd :: Nil => cmd
-      case names      => generalError(s"$scriptName $name command '$cmdName' is ambiguous.  (${names.map(_.cmdName).mkString(", ")})")
+      case Nil => 
+        println(s"'$cmdName' is not a valid $scriptName $name command")
+        showHelp()
+      case cmd :: Nil =>
+        cmd
+      case names =>
+        generalError(s"$scriptName $name command '$cmdName' is ambiguous.  (${names.map(_.cmdName).mkString(", ")})")
     }
   }
 

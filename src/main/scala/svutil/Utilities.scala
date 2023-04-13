@@ -76,6 +76,15 @@ object Utilities {
     }
   }
 
+  def inWorkingCopy(): Boolean = {
+      try {
+        getWorkingCopyInfo()
+        true
+      }
+      catch {
+        case GeneralError(_) => false
+      }
+  }
 
   //  Starting in the current working directory search for the top
   //  of the working copy.  The directory that contains the .svn directory.

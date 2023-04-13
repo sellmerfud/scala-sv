@@ -321,12 +321,14 @@ object Bisect extends Command {
   
   private sealed trait BisectCommand {
     val cmdName: String
+    val description: String
     def run(args: Seq[String]): Unit
   }
   
   // == Start Command ====================================================
   private case object Start extends BisectCommand {
     override val cmdName = "start"
+    override val description = "Start a bisect session in the working copy"
       
     private case class Options(
       bad:      Option[String] = None,
@@ -345,7 +347,7 @@ object Bisect extends Command {
         
         banner = s"usage: $cmdPrefix [<options]"
         separator("")
-        separator("Start a bisect session in the working copy")
+        separator(description)
         separator("Options:")        
 
         reqd[RevisionArg]("", "--bad=<revision>",    "The earliest revision that contains the bug")
@@ -371,10 +373,8 @@ object Bisect extends Command {
     override def run(args: Seq[String]): Unit = {
       val options = processCommandLine(args)
       
-      //  Ensure that we are in a directory that is part of a subverion working copy
-      getWorkingCopyRoot() getOrElse {
+      if (!inWorkingCopy())
         generalError(s"You must run this command from within a subversion working copy directory")
-      }
       
       loadBisectData() match {
         case Some(data) =>
@@ -440,6 +440,7 @@ object Bisect extends Command {
   // == Bad Command ==++==================================================
   private case object Bad extends BisectCommand {
     override val cmdName = "bad"
+    override val description = "Mark a revision as bad  (It contains the bug)"
     
     private case class Options(revision: Option[String] = None)
     
@@ -452,7 +453,7 @@ object Bisect extends Command {
         
         banner = s"usage: $cmdPrefix [<revision>]"
         separator("")
-        separator("Mark a revision as bad  (It contains the bug)")
+        separator(description)
         separator("Options:")
 
         flag("-h", "--help", "Show this message")
@@ -529,7 +530,8 @@ object Bisect extends Command {
   
   // == Good Command ==+==================================================
   private case object Good extends BisectCommand {
-    override val cmdName = "good" 
+    override val cmdName = "good"
+    override val description = "Mark a revision as good  (It does not contain the bug)"
     
     private case class Options(revision: Option[String] = None)
     
@@ -542,7 +544,7 @@ object Bisect extends Command {
         
         banner = s"usage: $cmdPrefix [<revision>]"
         separator("")
-        separator("Mark a revision as good  (It does not contain the bug)")
+        separator(description)
         separator("Options:")
 
         flag("-h", "--help", "Show this message")
@@ -620,6 +622,7 @@ object Bisect extends Command {
   // == Terms Command ====================================================
   private case object Terms extends BisectCommand {
     override val cmdName = "terms"
+    override val description = "Show the currently defined terms for good/bad"
     
     private case class Options(termGood: Boolean = false, termBad: Boolean = false)
     
@@ -630,7 +633,7 @@ object Bisect extends Command {
         
         banner = s"usage: $cmdPrefix [--term-good|--term-bad]"
         separator("")
-        separator("Show the currently defined terms for good/bad")
+        separator(description)
         separator("Options:")
 
         flag("", "--term-good", "Display only the term for 'good'")
@@ -687,6 +690,8 @@ object Bisect extends Command {
   // == Skip Command ====================================================+
   private case object Skip extends BisectCommand {
     override val cmdName = "skip"
+    override val description = "Skip a revision.  It will no longer be considered"
+    
     private case class Options(ranges: Seq[RevRange] = Seq.empty)
     
     private def processCommandLine(args: Seq[String]): Options = {
@@ -698,7 +703,7 @@ object Bisect extends Command {
         
         banner = s"usage: $cmdPrefix [<revision>|<revision>:<revision>]..."
         separator("")
-        separator("Skip a revision.  It will no longer be considered")
+        separator(description)
         separator("Options:")
 
         flag("-h", "--help", "Show this message")
@@ -752,6 +757,7 @@ object Bisect extends Command {
   // == Unskip Command ====================================================+
   private case object Unskip extends BisectCommand {
     override val cmdName = "unskip"
+    override val description = "Reinstate a previously skipped revision"
     
     private case class Options(ranges: Seq[RevRange] = Seq.empty)
     
@@ -764,7 +770,7 @@ object Bisect extends Command {
         
         banner = s"usage: $cmdPrefix [<revision>|<revision>:<revision>]..."
         separator("")
-        separator("Reinstate a previously skipped revision")
+        separator(description)
         separator("Options:")
 
         flag("-h", "--help", "Show this message")
@@ -817,6 +823,8 @@ object Bisect extends Command {
   // == Run Command ======================================================
   private case object Run extends BisectCommand {
     override val cmdName = "run"
+    override val description = "Automate the bisect session by running a script"
+    
     val cmdPrefix = s"$scriptName $name $cmdName"
 
     case class Options(cmdArgs: Seq[String] = Seq.empty)
@@ -827,7 +835,7 @@ object Bisect extends Command {
         
         banner = s"usage: $cmdPrefix <cmd> [<arg>...]"
         separator("")
-        separator("Automate the bisect session by running a script")
+        separator(description)
         separator("Options:")
 
         flag("-h", "--help", "Show this message")
@@ -910,6 +918,7 @@ object Bisect extends Command {
   // == Reset Command ====================================================
   private case object Reset extends BisectCommand {
     override val cmdName = "reset"
+    override val description = "Clean up after a bisect session"
 
     private case class Options(update: Boolean = true, revision: Option[String] = None)
     
@@ -922,7 +931,7 @@ object Bisect extends Command {
         
         banner = s"usage: $cmdPrefix [<options>] [<revision>]"
         separator("")
-        separator("Clean up after a bisect session")
+        separator(description)
         separator("Options:")
 
         flag("", "--no-update",    "Do not update working copy")
@@ -966,6 +975,7 @@ object Bisect extends Command {
   // == Log Command ======================================================
   private case object Log extends BisectCommand {
     override val cmdName = "log"
+    override val description = "Show the bisect log"
 
     private def processCommandLine(args: Seq[String]): Unit = {
 
@@ -974,7 +984,7 @@ object Bisect extends Command {
         
         banner = s"usage: $cmdPrefix [<options>]"
         separator("")
-        separator("Show the bisect log")
+        separator(description)
         separator("Options:")
 
         flag("-h", "--help", "Show this message")
@@ -994,6 +1004,7 @@ object Bisect extends Command {
   // == Replay Command ===================================================
   private case object Replay extends BisectCommand {
     override val cmdName = "replay"
+    override val description = "Replay the bisect session from a log file"
     
     private case class Options(logFile: Option[File] = None)
     
@@ -1006,7 +1017,7 @@ object Bisect extends Command {
         
         banner = s"usage: $cmdPrefix [<options>] <log file>"
         separator("")
-        separator("Replay the bisect session from a log file")
+        separator(description)
         separator("Options:")
 
         flag("-h", "--help", "Show this message")
@@ -1052,29 +1063,27 @@ object Bisect extends Command {
   
   private def showHelp(): Nothing = {
     val sv = scriptName
-    val help = s"""|$description
-                   |
-                   |Available bisect commands:
-                   |$sv $name start     Start a bisect session in the working copy
-                   |$sv $name bad       Mark a revision as bad  (It contains the bug)
-                   |$sv $name good      Mark a revision as good  (It does not contain the bug)
-                   |$sv $name terms     Show the currently defined terms for good/bad
-                   |$sv $name skip      Skip a revision.  It will no longer be considered
-                   |$sv $name unskip    Reinstate a previously skipped revision
-                   |$sv $name run       Automate the bisect session by running a script
-                   |$sv $name log       Show the bisect log
-                   |$sv $name replay    Replay the bisect session from a log file
-                   |$sv $name reset     Clean up after a bisect session
-                   |
-                   |Type '$sv $name <command> --help' for details on a specific command""".stripMargin
-      println(help)
-      throw HelpException()
+    val help1 = s"""|$description
+                    |
+                    |Available bisect commands:""".stripMargin
+    val help2 = s"""|
+                    |Type '$sv $name <command> --help' for details on a specific command""".stripMargin
+                    
+    println(help1)
+    for (c <- bisectCommands)
+      println(f"$sv ${c.cmdName}%-8s  ${c.description}")
+    println(help2)
+    
+    
+    throw HelpException()
   }
   
   private def getBisectCommand(cmdName: String, termBad: Option[String], termGood: Option[String]): BisectCommand = {
     val cmdList = bisectCommands.map(_.cmdName) ::: termBad.toList ::: termGood.toList
     matchCommand(cmdName, cmdList) match {
-      case Nil                                   => showHelp()
+      case Nil                                   =>
+        println(s"'$cmdName' is not a valid $scriptName $name command")
+        showHelp()
       case name :: Nil if Some(name) == termBad  => Bad
       case name :: Nil if Some(name) == termGood => Good
       case name :: Nil                           => bisectCommands.find(_.cmdName == name).get
@@ -1089,9 +1098,14 @@ object Bisect extends Command {
     if (args.isEmpty || args.head == "help" || args.head == "--help")
       showHelp();
     else {
-      val wcInfo  = getWorkingCopyInfo()
-      val optData = loadBisectData()
-      val command = getBisectCommand(args.head, optData flatMap (_.termBad), optData flatMap (_.termGood))
+      val (badOverride, goodOverride) = if (inWorkingCopy()) {
+        val optData = loadBisectData()
+        (optData flatMap (_.termBad), optData flatMap (_.termGood))
+      }
+      else
+        (None, None)
+
+      val command = getBisectCommand(args.head, badOverride, goodOverride)
       command.run(args.tail)
     }
   } 
