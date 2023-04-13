@@ -248,7 +248,7 @@ object Utilities {
     
     LogEntry(
       revision = entry.attributes("revision").head.text,
-      author   = (entry \ "author").head.text,
+      author   = (entry \ "author").headOption map (_.text) getOrElse "(no author)",
       date     = parseISODate((entry \ "date").head.text),
       msg      = (entry \ "msg").headOption map { _.text.split("\n").toSeq } getOrElse Seq.empty ,
       paths    = pathEntries)
