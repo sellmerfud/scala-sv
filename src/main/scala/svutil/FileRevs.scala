@@ -9,6 +9,8 @@ import scala.xml._
 import scala.util.{ Try, Success, Failure }
 import Color._
 import Utilities._
+import svn.model.SvnInfo
+import svn.model.{ ListEntry }
 
 object FileRevs extends Command {
   
@@ -62,7 +64,7 @@ object FileRevs extends Command {
     if (options.branches.isEmpty)
       Nil
     else
-      getSvnLists(joinPaths(rootUrl, "branches")).head.entries filter { entry =>
+      svn.pathList(joinPaths(rootUrl, "branches")).head.entries filter { entry =>
         options.branches.exists(regex => regex.findFirstIn(entry.name).nonEmpty)
       }
   }
@@ -71,13 +73,13 @@ object FileRevs extends Command {
     if (options.tags.isEmpty)
       Nil
     else
-      getSvnLists(joinPaths(rootUrl, "tags")).head.entries filter { entry =>
+      svn.pathList(joinPaths(rootUrl, "tags")).head.entries filter { entry =>
         options.tags.exists(regex => regex.findFirstIn(entry.name).nonEmpty)
       }
   }
   
   private def getTrunk(rootUrl: String): ListEntry = {
-    getSvnLists(rootUrl).head.entries find (_.name == "trunk") getOrElse {
+    svn.pathList(rootUrl).head.entries find (_.name == "trunk") getOrElse {
       generalError(s"Cannot find repository trunk: ${joinPaths(rootUrl, "trunk")}")
     }
   }
@@ -124,7 +126,7 @@ object FileRevs extends Command {
       val prefix    = pathPrefix(pathType, location)
       val entryPath = joinPaths(rootUrl, prefix, relPath)
       
-      Try(getSvnInfo(entryPath)) match {
+      Try(svn.info(entryPath)) match {
         case Success(info) => Result(prefix, Some(info))
         case Failure(e)    => Result(prefix, None)
       }
@@ -185,7 +187,7 @@ object FileRevs extends Command {
     if (options.paths.isEmpty)
       generalError("At least one path must be specified.")
       
-    val pathList = getSvnInfoList(options.paths filterNot (_.trim == ""))
+    val pathList = svn.infoList(options.paths filterNot (_.trim == ""))
     
     // First make sure all paths are rooted in the same repository
     if ((pathList map (_.repoUUID)).distinct.size != 1)

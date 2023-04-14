@@ -6,27 +6,26 @@ import scala.util.matching.Regex
 import java.time.LocalDateTime
 import Color._
 import Utilities._
+import svn.model.{ LogEntry, SearchOption }
 
 object Log extends Command {
   
   override val name = "log"
   override val description = "Display formatted log entries"
-  case class Search(glob: String, searchAnd: Boolean)
   case class Options(
-    limit:     Option[Int]    = None,
-    author:    Boolean        = false,
-    date:      Boolean        = false,
-    time:      Boolean        = false,
-    full:      Boolean        = false,
-    showPaths: Boolean        = false,
-    show:      Boolean        = false,
-    noCopy:    Boolean        = false,
-    incoming:  Boolean        = false,
-    reverse:   Boolean        = false,
-    revisions: Vector[String] = Vector.empty,
-    search:    Vector[Search] = Vector.empty,
-    regexes:   Vector[Regex]  = Vector.empty,
-    paths:     Vector[String] = Vector.empty)
+    limit:     Option[Int]          = None,
+    author:    Boolean              = false,
+    date:      Boolean              = false,
+    time:      Boolean              = false,
+    full:      Boolean              = false,
+    showPaths: Boolean              = false,
+    noCopy:    Boolean              = false,
+    incoming:  Boolean              = false,
+    reverse:   Boolean              = false,
+    revisions: Vector[String]       = Vector.empty,
+    search:    Vector[SearchOption] = Vector.empty,
+    regexes:   Vector[Regex]        = Vector.empty,
+    paths:     Vector[String]       = Vector.empty)
 
 
 
@@ -91,14 +90,11 @@ object Log extends Command {
         { (regex, options) => options.copy(regexes = options.regexes :+ regex) }
         
       reqd[String]("-s", "--search=<glob>", "Limits commits to those with a message containing <glob>")
-        { (glob, options) => options.copy(search = options.search :+ Search(glob, searchAnd = false)) }
+        { (glob, options) => options.copy(search = options.search :+ SearchOption(glob, searchAnd = false)) }
       
       reqd[String]("", "--search-and=<glob>", "Combine <glob> with the previous search pattern")
-        { (glob, options) => options.copy(search = options.search :+ Search(glob, searchAnd = true)) }
+        { (glob, options) => options.copy(search = options.search :+ SearchOption(glob, searchAnd = true)) }
 
-      flag("", "--show", "Show the resulting svn log command instead of running it")
-        { _.copy(show = true) }
-      
       flag("-h", "--help", "Show this message")
           { _ => println(help); throw HelpException() }
   
@@ -113,7 +109,7 @@ object Log extends Command {
     parser.parse(args, Options())
   }
   
-  def showResults(cmdLine: Seq[String], options: Options): Unit = {
+  def showResults(options: Options): Unit = {
     import scala.xml._
     
     //  Filter the log entries to those that match any regular expressions
@@ -126,9 +122,7 @@ object Log extends Command {
         options.regexes exists (_.findFirstIn(msg).nonEmpty)
       }
         
-    val logData = runCmd(cmdLine).mkString("\n")
-    // Parse the XML log entries
-    val entries = matching((XML.loadString(logData) \ "logentry") map parseLogEntry)
+    val entries = matching(getLogEntries(options))
 
     // When showing incoming changes there is a possiblity that the BASE
     // revision already exists in the working directory.
@@ -145,11 +139,11 @@ object Log extends Command {
         }
       }
       val wcPath = options.paths.headOption getOrElse "."
-      val wcPathInfo = getSvnInfo(wcPath)
+      val wcPathInfo = svn.info(wcPath)
       if (wcPathInfo.kind == "dir")
         Some(wcPathInfo.commitRev)
       else
-        Some(getSvnInfo(parentDir(wcPath)).commitRev)
+        Some(svn.info(parentDir(wcPath)).commitRev)
     }
     else
       None
@@ -198,50 +192,37 @@ object Log extends Command {
    s"""^$revPart(?::$revPart)?$$""".r matches str 
   }
     
-  def buildCmdLine(options: Options): Seq[String] = {
-    var cmdLine = Vector[String]("svn", "log", "--xml")
-    
-    options.limit foreach { limit => cmdLine :+= s"--limit=${limit}" } 
-    if (options.showPaths)
-      cmdLine :+= "--verbose"
-    if (options.noCopy)
-      cmdLine :+= "--stop-on-copy"
-    
-    cmdLine :++= (options.search map { 
-      case Search(glob, false) => s"--search=$glob"
-      case Search(glob, true) => s"--search-and=$glob"
-    })
-    
+  def getLogEntries(options: Options): Seq[LogEntry] = {
     //  If no revisions are specified and the first 'path' looks like a revision
     //  then treat it as one, appending :0 if it does not have a range.
     //
     //  If only a single revision is specified and it does not contain
     //  a range,then we add :0 so that we get the log starting from that point.
-    val paths = if (options.revisions.isEmpty && options.paths.nonEmpty && looksLikeRevision(options.paths.head)) {
+    val (paths, revisions) = if (options.revisions.isEmpty && options.paths.nonEmpty && looksLikeRevision(options.paths.head)) {
       val rev = options.paths.head
       val fullRev = if (rev contains ':') rev else s"$rev:0"
-      cmdLine :+= s"--revision=${fullRev}"
-      options.paths.tail
+      (options.paths.tail, Vector(fullRev))
     }
     else {
-      if (options.revisions.size == 1 && !(options.revisions.head contains ':'))
-        cmdLine :+= s"--revision=${options.revisions.head}:0"
+      val revs = if (options.revisions.size == 1 && !(options.revisions.head contains ':'))
+        Vector(s"${options.revisions.head}:0")
       else
-        cmdLine :++= (options.revisions map { revision => s"--revision=$revision" })
-      options.paths
+        options.revisions
+      (options.paths, revs)
     }  
-      
-    cmdLine :++= paths          
-    cmdLine
+    
+    svn.log(
+      paths         = paths,
+      revisions     = revisions,
+      limit         = options.limit,
+      includePaths  = options.showPaths,
+      stopOnCopy    = options.noCopy,
+      searchOptions = options.search
+    )
   }
   
   
   override def run(args: Seq[String]): Unit = {
-    val options = processCommandLine(args)
-    val cmdLine = buildCmdLine(options)
-    val status = if (options.show)
-      println(cmdLine mkString " ")
-    else
-      showResults(cmdLine, options)    
+    showResults(processCommandLine(args))    
   } 
 }

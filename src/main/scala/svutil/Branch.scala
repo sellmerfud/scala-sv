@@ -7,6 +7,7 @@ import java.util.regex.PatternSyntaxException
 import scala.xml._
 import Color._
 import Utilities._
+import svn.model.{ ListEntry }
 
 object Branch extends Command {
   
@@ -83,14 +84,14 @@ object Branch extends Command {
       println(header)
       println("--------------------")
       
-      val x = getSvnLists(url)
-      getSvnLists(url).head.entries filter acceptable foreach { entry =>
+      val x = svn.pathList(url)
+      svn.pathList(url).head.entries filter acceptable foreach { entry =>
         println(green(entry.name))
       }
     }
     
     val baseMatch = """(.*?)/(?:trunk|branches|tags)(?:/.*)?""".r
-    val baseUrl = getSvnInfo(options.path).url match {
+    val baseUrl = svn.info(options.path).url match {
         case baseMatch(base) => base
         case _               => generalError(s"Cannot find the '$name' directory for the repository")
       }
@@ -104,7 +105,7 @@ object Branch extends Command {
   }
   
   private def showCurrentBranch(options: Options): Unit = {
-    val (branch, revision) = getCurrentBranch(options.path)
+    val (branch, revision) = svn.currentBranch(options.path)
     println(s"Current branch: ${green(branch)} [${yellow(revision)}]")
   }
   

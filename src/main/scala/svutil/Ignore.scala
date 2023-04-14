@@ -42,7 +42,7 @@ object Ignore extends Command {
   
   // Make sure it refers to a directory in the working copy
   private def isWorkingCopyDirectory(path: String): Boolean = {
-    val info = getSvnInfo(path)
+    val info = svn.info(path)
     info.workingCopyPath.nonEmpty && info.kind == "dir"
   }
   
@@ -83,7 +83,7 @@ object Ignore extends Command {
       }
       
       //  Recursively process all subdirectories
-      val subDirs = getSvnLists(dirPath).head.entries filter (_.kind =="dir")
+      val subDirs = svn.pathList(dirPath).head.entries filter (_.kind =="dir")
       for (subdir <- subDirs) {
           val subDirPath = joinPaths(dirPath, subdir.name.chomp("/"))
           svnIgnore(subDirPath)

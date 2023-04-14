@@ -7,6 +7,7 @@ import scala.util.matching.Regex
 import scala.xml._
 import Color._
 import Utilities._
+import svn.model.{ LogEntry }
 
 object Show extends Command {
   
@@ -66,10 +67,12 @@ object Show extends Command {
     //  even though 'svn info' would succeed.  To work around this oddity
     //  we append :0 to the revision and limit the log to 1 entry.
     val fixRev   = (rev: String) => if (rev contains ':') rev else s"$rev:0"
-    val revArg   = (options.revision map (r => s"--revision=${fixRev(r)}")).toSeq
-    val cmdLine  = Seq("svn", "log", "--xml", "--limit=1", "--verbose") ++ revArg :+ path
-    val logXML   = XML.loadString(runCmd(cmdLine).mkString("\n"))
-    (logXML \ "logentry").headOption map parseLogEntry
+    svn.log(
+      paths        = Seq(path),
+      revisions    = options.revision.toSeq map fixRev,
+      limit        = Some(1),
+      includePaths = true
+    ).headOption
   }
   
   def looksLikeRevision(str: String): Boolean = """^(\d+|HEAD|BASE|PREV|COMMITTED)$""".r matches str
@@ -89,8 +92,10 @@ object Show extends Command {
       println()
       println(blue(path))
       showCommit(log, finalOptions.showMsg, finalOptions.showPaths)
-      if (finalOptions.showDiff)
-        showChangeDiff(path, log.revision)
+      if (finalOptions.showDiff) {
+        println()
+        svn.changeDiff(path, log.revision) foreach printDiffLine
+      }
     }
   } 
 }

@@ -225,11 +225,7 @@ object Stash extends Command {
     }
     
     private def getLogMessage1st(wcRoot: os.Path): String = {
-      val cmdLine = Seq("svn", "log", "--xml", "--revision=HEAD", wcRoot.toString)
-      val out     = runCmd(cmdLine)
-      val entries = (XML.loadString(out.mkString("\n")) \ "logentry") map parseLogEntry
-      
-      entries.head.msg.headOption getOrElse ""
+      svn.log(Seq(wcRoot.toString), Seq("HEAD")).head.msg.headOption getOrElse ""
     }
 
     //  Runs `svn status` on the working copy root directory
@@ -244,7 +240,7 @@ object Stash extends Command {
     //  "added" so we must mark them as unversioned in our own item list.
     //  So this function will alter the working copy when unversioned items are being stashed.
     private def getStashItems(wcRoot: os.Path, unversioned: Boolean): List[StashItem] = {
-      
+      import svn.model.StatusEntry
       //  We always filter out entries with item status of "normal".  These have only property changes.
       //  which we do not care about.
       //  We also filter out entries with item status of "unversioned" unless the user choseen to
@@ -259,7 +255,7 @@ object Stash extends Command {
       
       // Get the status starting at the wcRoot to determine what is dirty and must be stashed
       def getWorkingCopyItems(): List[StashItem] = {
-        getSvnStatus(".", Some(wcRoot)).entries.toList filter included map toItem
+        svn.status(".", Some(wcRoot)).entries.toList filter included map toItem
       }
       
       def addToWorkingCopy(paths: Seq[String]): Unit = {
@@ -307,14 +303,14 @@ object Stash extends Command {
     
     override def run(args: Seq[String]): Unit = {
       val options = processCommandLine(args)
-      val wcInfo  = getWorkingCopyInfo()  // Make sure the current directory is in a subversion working copy
-      val wcRoot  = getWorkingCopyRoot().get  // All commands will be run from the top dir
+      svn.workingCopyInfo  // Make sure the current directory is in a subversion working copy
+      val wcRoot  = svn.workingCopyRoot.get  // All commands will be run from the top dir
       val items   = getStashItems(wcRoot, options.unversioned)
       
       if (items.isEmpty)
         successExit("No local changes to save")
       
-      val (branch, revision) = getCurrentBranch(wcRoot.toString)
+      val (branch, revision) = svn.currentBranch(wcRoot.toString)
       val description        = options.description getOrElse getLogMessage1st(wcRoot)
       
       val patchName = createPatchName()
@@ -382,7 +378,7 @@ object Stash extends Command {
     
     override def run(args: Seq[String]): Unit = {
       processCommandLine(args) // User may have specified --help, -h
-      getWorkingCopyInfo()     // Make sure the current directory is in a subversion working copy
+      svn.workingCopyInfo     // Make sure the current directory is in a subversion working copy
       
       for ((stash, index) <- loadStashEntries().view.zipWithIndex) {
       
@@ -430,8 +426,8 @@ object Stash extends Command {
         
     override def run(args: Seq[String]): Unit = {
       val options    = processCommandLine(args)
-      val wcInfo     = getWorkingCopyInfo()  // Make sure the current directory is in a subversion working copy
-      val wcRoot     = getWorkingCopyRoot().get  // All commands will be run from the top dir
+      svn.workingCopyInfo  // Make sure the current directory is in a subversion working copy
+      val wcRoot     = svn.workingCopyRoot.get  // All commands will be run from the top dir
       val index      = options.stashIndex getOrElse 0
       val stashList  = loadStashEntries()
       val stash      = if (stashList.size >= index + 1)
@@ -500,8 +496,8 @@ object Stash extends Command {
     
     override def run(args: Seq[String]): Unit = {
       val options    = processCommandLine(args)
-      val wcInfo     = getWorkingCopyInfo()  // Make sure the current directory is in a subversion working copy
-      val wcRoot     = getWorkingCopyRoot().get  // All commands will be run from the top dir
+      svn.workingCopyInfo  // Make sure the current directory is in a subversion working copy
+      val wcRoot     = svn.workingCopyRoot.get  // All commands will be run from the top dir
       val index      = options.stashIndex getOrElse 0
       val stashList  = loadStashEntries()
       val stash      = if (stashList.size >= index + 1)
@@ -560,8 +556,8 @@ object Stash extends Command {
     
     override def run(args: Seq[String]): Unit = {
       val options    = processCommandLine(args)
-      val wcInfo     = getWorkingCopyInfo()  // Make sure the current directory is in a subversion working copy
-      val wcRoot     = getWorkingCopyRoot().get  // All commands will be run from the top dir
+      svn.workingCopyInfo  // Make sure the current directory is in a subversion working copy
+      val wcRoot     = svn.workingCopyRoot.get  // All commands will be run from the top dir
       val index      = options.stashIndex getOrElse 0
       val stashList  = loadStashEntries()
       val stash      = if (stashList.size >= index + 1)
@@ -608,8 +604,8 @@ object Stash extends Command {
     
     override def run(args: Seq[String]): Unit = {
       val options    = processCommandLine(args)
-      val wcInfo     = getWorkingCopyInfo()  // Make sure the current directory is in a subversion working copy
-      val wcRoot     = getWorkingCopyRoot().get  // All commands will be run from the top dir
+      svn.workingCopyInfo  // Make sure the current directory is in a subversion working copy
+      val wcRoot     = svn.workingCopyRoot.get  // All commands will be run from the top dir
       val index      = options.stashIndex getOrElse 0
       val stashList  = loadStashEntries()
       val stash      = if (stashList.size >= index + 1)
@@ -651,8 +647,8 @@ object Stash extends Command {
     
     override def run(args: Seq[String]): Unit = {
       processCommandLine(args) // To handle --help, -h
-      val wcInfo     = getWorkingCopyInfo()  // Make sure the current directory is in a subversion working copy
-      val stashList  = loadStashEntries()
+      svn.workingCopyInfo  // Make sure the current directory is in a subversion working copy
+      val stashList = loadStashEntries()
 
       // remove each patch file
       for (stash <- loadStashEntries())
