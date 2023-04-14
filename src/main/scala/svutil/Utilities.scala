@@ -30,7 +30,7 @@ object Utilities {
       case suf  if str.endsWith(suf)                        => str.slice(0, str.length - suf.length)
       case _                                                => str
     }
-    def isInteger = str forall (_.isDigit)
+    def isNumber = str forall (_.isDigit)
   }
 
   // Join paths returned by svn commands

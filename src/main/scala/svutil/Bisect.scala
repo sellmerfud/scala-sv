@@ -20,7 +20,7 @@ object Bisect extends Command {
 
   // Ordering for a sequence of revisions
   // We sort them from High (most recent) to Low(least recent)
-  val RevisionOrdering: Ordering[String] = Ordering.by { revision => -revision.toInt }
+  val RevisionOrdering: Ordering[String] = Ordering.by { revision => -revision.toLong }
 
   case class ExtantEntry(revision: String, msg1st: String)
   private object ExtantEntry {
@@ -74,8 +74,8 @@ object Bisect extends Command {
       revisions
   }
       
-  private def bisectDataFile = getDataDirectory() / "sv_bisect_data.json"
-  private def bisectLogFile  = getDataDirectory() / "sv_bisect_log"
+  private def bisectDataFile = getDataDirectory() / "bisect_data.json"
+  private def bisectLogFile  = getDataDirectory() / "bisect_log"
     
   private def loadBisectData(): Option[BisectData] = {
     if (os.isFile(bisectDataFile)) {
@@ -246,16 +246,16 @@ object Bisect extends Command {
   //  the working copy then we simply get an empty list.
   //  For HEAD, BASE, COMMITTED, PREV we have to specify a range and limit
   //  in order for subversion to return the log entry.
-  private def resolveWorkingCopyRevision(rev: String): Option[Int] = {
-    if (rev.isInteger) {
+  private def resolveWorkingCopyRevision(rev: String): Option[Long] = {
+    if (rev.isNumber) {
       Try(svn.info(".", Some(rev)).commitRev) match {
-        case Success(rev) => Some(rev.toInt)
+        case Success(rev) => Some(rev.toLong)
         case Failure(_)   => None
       }
     }
     else {
       Try(svn.log(revisions = Seq(s"$rev:0"), limit = Some(1), includeMessage = false)) match {
-        case Success(e +: _) => Some(e.revision.toInt)
+        case Success(e +: _) => Some(e.revision.toLong)
         case Success(_)      => None
         case Failure(_)      => None
       }
@@ -278,7 +278,7 @@ object Bisect extends Command {
     }
   }
 
-  private case class RevisionRangeArg(low: Int, high: Int)
+  private case class RevisionRangeArg(low: Long, high: Long)
   
   private val revisionRangeArgParser = (arg: String) => {
     val revPart = """\d+|HEAD|BASE|PREV|COMMITTED"""
@@ -385,7 +385,7 @@ object Bisect extends Command {
           generalError(s"Type '$scriptName $name ${Reset.cmdName} --help' for more information")
           
         case None =>
-          (options.bad map (_.toInt), options.good map (_.toInt)) match {
+          (options.bad map (_.toLong), options.good map (_.toLong)) match {
             case (Some(bad), Some(good)) if bad == good =>
               generalError("The 'bad' and 'good' revisions cannot be the same")
               
@@ -474,15 +474,15 @@ object Bisect extends Command {
       val data        = getBisectData()
       val options     = processCommandLine(args, data.termBadName)
       val revision    = options.revision getOrElse svn.workingCopyInfo.commitRev
-      val minRev      = data.minRev map (_.toInt) getOrElse -1
-      val startMaxRev = data.startMaxRev map (_.toInt) getOrElse Int.MaxValue
+      val minRev      = data.minRev map (_.toLong) getOrElse -1L
+      val startMaxRev = data.startMaxRev map (_.toLong) getOrElse Long.MaxValue
       
       // The new bad revision can come after the existing maxRev
       // This allows the user to recheck a range of commits.
       // The new bad revision cannot be less than or equal to the minRev
-      if (revision.toInt <= minRev)
+      if (revision.toLong <= minRev)
         println(s"'${data.termBadName}' revision must be more recent than the '${data.termGoodName}' revision")
-      else if (revision.toInt > startMaxRev)
+      else if (revision.toLong > startMaxRev)
         println(s"'${data.termBadName}' revision is out of range, cannot come after starting '${data.termBadName}' revision ($startMaxRev)")
       else {
         markBadRevision(revision)
@@ -565,15 +565,15 @@ object Bisect extends Command {
       val data        = getBisectData()
       val options     = processCommandLine(args, data.termGoodName)
       val revision    = options.revision getOrElse svn.workingCopyInfo.commitRev
-      val maxRev      = data.maxRev map (_.toInt) getOrElse Int.MaxValue
-      val startMinRev = data.startMinRev map (_.toInt) getOrElse -1
+      val maxRev      = data.maxRev map (_.toLong) getOrElse Long.MaxValue
+      val startMinRev = data.startMinRev map (_.toLong) getOrElse -1L
 
       // The new good revision can come before the exisiing minRev
       // This allow the user to recheck a range of commits.
       // The new good revision cannot be greater than or equal to the maxRev
-      if (revision.toInt >= maxRev)
+      if (revision.toLong >= maxRev)
         println(s"'${data.termGoodName}' revision must be older than the '${data.termBadName}' revision")
-      else if (revision.toInt < startMinRev)
+      else if (revision.toLong < startMinRev)
         println(s"'${data.termGoodName}' revision is out of range, cannot come before starting '${data.termGoodName}' revision ($startMinRev)")
       else {
         markGoodRevision(revision)
@@ -678,7 +678,7 @@ object Bisect extends Command {
     }
   }
   
-  private case class RevRange(low: Int, high: Int)
+  private case class RevRange(low: Long, high: Long)
   
   private def rangesToSet(ranges: Seq[RevRange]): Set[String] = {
     ranges.foldLeft(Set.empty[String]) {
