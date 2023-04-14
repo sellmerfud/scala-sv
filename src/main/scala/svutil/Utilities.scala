@@ -11,7 +11,7 @@ import Color._
 import svn.model.{ LogEntry }
 
 object Utilities {
-  
+
   lazy val scriptPath = propOrElse("sv.scriptname", "sv")
   lazy val scriptName = new File(scriptPath).getName
   
@@ -60,9 +60,11 @@ object Utilities {
     utcDate.format(ISODateFormat)
   }
   
-  def displayDate(date: LocalDateTime): String = date.format(DisplayDateFormat)
-  def displayTime(date: LocalDateTime): String = date.format(DisplayTimeFormat)
-  def displayDateTime(date: LocalDateTime): String = s"${displayDate(date)} ${displayTime(date)}"
+  val NULL_DATETIME = LocalDateTime.ofEpochSecond(0, 0, ZoneOffset.UTC)
+  def displayDate(date: LocalDateTime): String = if (date == NULL_DATETIME) "n/a" else date.format(DisplayDateFormat)
+  def displayTime(date: LocalDateTime): String = if (date == NULL_DATETIME) "n/a" else date.format(DisplayTimeFormat)
+  def displayDateTime(date: LocalDateTime): String = 
+    if (date == NULL_DATETIME) "n/a" else s"${displayDate(date)} ${displayTime(date)}"
 
   //  We create a .sv directory in the top directory of the working copy
   //  This gives sv commands a place to store data

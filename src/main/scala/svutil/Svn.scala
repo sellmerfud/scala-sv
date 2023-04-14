@@ -17,6 +17,7 @@ object svn {
   // svn info
   // ==========================================
   object model {
+    
     case class SvnInfo(
       path: String,  // Not too useful
       repoRev: String,
@@ -191,7 +192,7 @@ object svn {
     LogEntry(
       revision = entry.attributes("revision").head.text,
       author   = (entry \ "author").headOption map (_.text) getOrElse "n/a",
-      date     = parseISODate((entry \ "date").head.text),
+      date     = (entry \ "date").headOption map (d => parseISODate(d.text)) getOrElse NULL_DATETIME,
       msg      = (entry \ "msg").headOption map { _.text.split("\n").toSeq } getOrElse Seq.empty ,
       paths    = pathEntries)
   }
