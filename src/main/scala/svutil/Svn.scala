@@ -3,9 +3,9 @@ package svutil
 
 import java.util.Locale
 import java.time.format.DateTimeFormatter
-import scala.util.Properties.propOrElse
+import java.io.{ FileWriter, PrintWriter }
+import scala.util.Properties.{ propOrNone, envOrNone, isWin }
 import java.time._
-import java.io.File
 import scala.xml._
 import Utilities._
 import Color._
@@ -13,6 +13,10 @@ import Color._
 //  Functions that execute svn and parse the results.
 object svn {
 
+  //  By default we use the `svn` command found on the user's PATH
+  //  But this can be overridden by an environment variable or java property.
+  lazy val svnCmd = envOrNone("SV_SVN") orElse propOrNone("sv.svn") getOrElse "svn"
+  
   // ==========================================
   // svn info
   // ==========================================
@@ -135,7 +139,7 @@ object svn {
   //  Get info for a single path
   def info(path: String, revision: Option[String] = None): SvnInfo = {
     val revArg  = revision map (r => Seq("--revision", r)) getOrElse Seq.empty
-    val cmdLine = Seq("svn", "info", "--xml") ++ revArg :+ path
+    val cmdLine = Seq(svnCmd, "info", "--xml") ++ revArg :+ path
     val out     = runCmd(cmdLine)
     val entry   = (XML.loadString(out.mkString("\n")) \ "entry").head
     parseSvnInfo(entry)
@@ -144,7 +148,7 @@ object svn {
   // Get info for multiple paths
   def infoList(paths: Seq[String], revision: Option[String] = None): Seq[SvnInfo] = {
     val revArg  = revision map (r => Seq("--revision", r)) getOrElse Seq.empty
-    val cmdLine = Seq("svn", "info", "--xml") ++ revArg ++ paths
+    val cmdLine = Seq(svnCmd, "info", "--xml") ++ revArg ++ paths
     val out     = runCmd(cmdLine)
     val entries = (XML.loadString(out.mkString("\n")) \ "entry")
     
@@ -201,7 +205,7 @@ object svn {
     if (paths.isEmpty)
       List.empty
     else {
-      val cmdLine   = Seq("svn", "list", "--xml") ++ paths
+      val cmdLine   = Seq(svnCmd, "list", "--xml") ++ paths
       val lsOut     = runCmd(cmdLine)
       val listNodes = (XML.loadString(lsOut.mkString("\n")) \ "list")
       
@@ -230,7 +234,7 @@ object svn {
   // If the path argument is a relative path, then the path of each entry will be relateive
   // to the givne path.
   def status(path: String, cwd: Option[os.Path]): SvnStatus = {
-    val cmdLine    = Seq("svn", "status", "--xml", path)
+    val cmdLine    = Seq(svnCmd, "status", "--xml", path)
     val out        = runCmd(cmdLine, cwd)
     val targetNode = (XML.loadString(out.mkString("\n")) \ "target").head
     val entryNodes = (targetNode \ "entry")
@@ -250,7 +254,7 @@ object svn {
   
   //  Returns the diff for the changes introduced by the given revision
   def changeDiff(pathOrUrl: String, commitRev: String): Seq[String] = {
-    runCmd(Seq("svn", "diff", "--change", commitRev, pathOrUrl))
+    runCmd(Seq(svnCmd, "diff", "--change", commitRev, pathOrUrl))
   }
 
   def log(
@@ -262,10 +266,10 @@ object svn {
     includePaths: Boolean = false,
     searchOptions: Seq[SearchOption] = Seq.empty
   ): Seq[LogEntry] = {
-    var cmdLine = Vector[String]("svn", "log", "--xml")
+    var cmdLine = Vector[String](svnCmd, "log", "--xml")
 
     if (!includeMessage) cmdLine :+= "--quiet"
-    if (!stopOnCopy)     cmdLine :+= "--stop-on-copy"
+    if (stopOnCopy)     cmdLine :+= "--stop-on-copy"
     if (includePaths)    cmdLine :+= "--verbose"
     cmdLine :++= limit.toSeq.map(l => s"--limit=$l")
     cmdLine :++= revisions.map(r => s"--revision=$r")
@@ -274,10 +278,51 @@ object svn {
       case SearchOption(glob, true)  => s"--search-and=$glob"
     }
     cmdLine :++= paths
-
     val xml = XML.loadString(runCmd(cmdLine).mkString("\n"))
     (xml \ "logentry") map parseLogEntry
-  }  
+  }
+  
+  def update(revision: String, depth: String = "infinity", cwd: Option[os.Path] = None): Seq[String] = {
+    runCmd(Seq(svnCmd, "update", s"--depth=$depth", s"--revision=$revision"), cwd)
+  }
+
+  def revert(paths: Seq[String], depth: String = "infinity", removeAdded: Boolean = false, cwd: Option[os.Path] = None): Seq[String] = {
+    val rmArg = if (removeAdded) Seq("--remove-added") else Seq.empty
+    val cmdLine = Seq(svnCmd, "revert", s"--depth=$depth") ++ rmArg ++ paths
+    runCmd(cmdLine, cwd)
+  }
+  
+  def createPatch(patchFile: os.Path, workingDirPath: String = ".", depth: String = "infinity", cwd: Option[os.Path] = None): Unit = {
+    val cmdLine = Seq(svnCmd, "diff", s"--depth=$depth", "--ignore-properties", workingDirPath)
+    val diffOut = runCmd(cmdLine, cwd)
+    val file    = patchFile.toIO
+    
+    try {
+      val writer = new PrintWriter(new FileWriter(file), true)
+      diffOut foreach writer.println
+      writer.close()
+    }
+    catch {
+      case e: Throwable =>
+        generalError(s"Error writing patch file ($file): ${e.getMessage}")
+    }
+  }
+
+  def applyPatch(patchFile: os.Path, dryRun: Boolean = false, cwd: Option[os.Path] = None): Seq[String] = {
+    val cmdLine   = if (dryRun) 
+      Seq(svnCmd, "patch", "--dry-run", patchFile.toString)
+    else
+      Seq(svnCmd, "patch", patchFile.toString)
+    
+    runCmd(cmdLine, cwd)
+  }
+  
+  def add(paths: Seq[String], depth: String = "infinity", noAutoProps: Boolean = false, cwd: Option[os.Path] = None): Seq[String] = {
+    val propsArg = if (noAutoProps) Seq("--no-auto-props") else Seq.empty
+    val cmdLine = Seq(svnCmd, "add", s"--depth=$depth") ++ propsArg ++ paths
+    runCmd(cmdLine, cwd)        
+  }
+    
 }
 
 

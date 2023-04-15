@@ -235,8 +235,8 @@ object Bisect extends Command {
   private def updateWorkingCopy(revision: String, data: Option[BisectData] = None): Unit = {
     val msg1st = get1stLogMessage(revision, data)
 
-    println(s"Updating working copy: [${yellow(revision)}] $msg1st")      
-    runCmd(Seq("svn", "update", s"--revision=$revision"))
+    println(s"Updating working copy: [${yellow(revision)}] $msg1st")
+    svn.update(revision)
   }
     
 

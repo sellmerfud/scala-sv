@@ -3,7 +3,6 @@
 package svutil
 
 import scala.util.matching.Regex
-import java.io.{ File, FileWriter, PrintWriter,  FileReader, BufferedReader }
 import java.util.regex.PatternSyntaxException
 import java.time.LocalDateTime
 import java.util.UUID
@@ -121,15 +120,11 @@ object Stash extends Command {
     val pathMatch = """([ADUCG>])(\s+)(.+)""".r
     val relWcRoot = wcRoot.relativeTo(os.pwd)
     val relCwd    = os.pwd.relativeTo(wcRoot)
-    val patchFile = (stashPath / stash.patchName).toString
-    val cmdLine   = if (dryRun) 
-      Seq("svn", "patch", "--dry-run", patchFile)
-    else
-      Seq("svn", "patch", patchFile)
-
+    val patchFile = (stashPath / stash.patchName)
     var lastStatus = ""
+    
     // First apply the patch
-    runCmd(cmdLine, Some(wcRoot)) foreach { 
+    svn.applyPatch(patchFile, dryRun, Some(wcRoot)) foreach { 
       case pathMatch(st, space, pathString) =>
         val relPath = if (st == ">")
           pathString  // Not a path 
@@ -159,8 +154,7 @@ object Stash extends Command {
         val unversionedDirs = unversionedItems filter (_.isDir)
         val canSkip = (item: StashItem) => unversionedDirs exists (d => item.path.startsWith(d.path) && item.path != d.path)
         val revertPaths = unversionedItems filterNot canSkip map (_.path)
-        val cmdLine = Seq("svn", "revert", "--depth=infinity") ++ revertPaths
-        runCmd(cmdLine, Some(wcRoot))        
+        svn.revert(revertPaths, cwd = Some(wcRoot))
       }
     
       //  Let the user know we finished successfully
@@ -206,26 +200,10 @@ object Stash extends Command {
 
       parser.parse(args, Options())
     }
-    
-    
-    private def createPatchFile(wcRoot: os.Path, patchName: String): Unit = {
-      val cmdLine = Seq("svn", "diff", "--depth=infinity", "--ignore-properties", ".")
-      val diffOut = runCmd(cmdLine, Some(wcRoot))
-      val file    = (stashPath / patchName).toIO
-      
-      try {
-        val writer = new PrintWriter(new FileWriter(file), true)
-        diffOut foreach writer.println
-        writer.close()
-      }
-      catch {
-        case e: Throwable =>
-          generalError(s"Error writing patch file ($file): ${e.getMessage}")
-      }
-    }
-    
+        
     private def getLogMessage1st(wcRoot: os.Path): String = {
-      svn.log(Seq(wcRoot.toString), Seq("HEAD")).head.msg.headOption getOrElse ""
+      val log = svn.log(Seq(wcRoot.toString), Seq("BASE:0"), limit = Some(1))
+      log.headOption flatMap (_.msg.headOption) getOrElse ""
     }
 
     //  Runs `svn status` on the working copy root directory
@@ -257,20 +235,16 @@ object Stash extends Command {
       def getWorkingCopyItems(): List[StashItem] = {
         svn.status(".", Some(wcRoot)).entries.toList filter included map toItem
       }
-      
-      def addToWorkingCopy(paths: Seq[String]): Unit = {
-        val cmdLine = Seq("svn", "add", "--depth=infinity", "--no-auto-props") ++ paths
-        runCmd(cmdLine, Some(wcRoot))        
-      }
-      
-      
+            
       def fixupUnversionedItems(initialItems: List[StashItem]): List[StashItem] = {
         val unversionedPaths = (initialItems filter (_.status == UNVERSIONED) map (_.path))
         
         if (unversionedPaths.isEmpty)
           initialItems
         else {
-          addToWorkingCopy(unversionedPaths)  // This recursively adds children of unversioned directories
+          // This recursively adds children of unversioned directories
+          svn.add(unversionedPaths, noAutoProps = true, cwd = Some(wcRoot))
+
           //  If there are no unversioned directories then no need to get the status again
           if (initialItems exists (item => item.isDir && item.status == UNVERSIONED)) {
             // Now we have unversioned items that have been added to the working-copy.
@@ -322,7 +296,7 @@ object Stash extends Command {
         }
       }
       
-      createPatchFile(wcRoot, patchName)
+      svn.createPatch(stashPath / patchName, cwd = Some(wcRoot))
       
       val stash = StashEntry(
         branch,
@@ -343,8 +317,7 @@ object Stash extends Command {
         val addedAndUnversionedDirs = items filter (i => i.isDir && (i.status == ADDED || i.status == UNVERSIONED))
         val canSkip = (item: StashItem) => addedAndUnversionedDirs exists (d => item.path.startsWith(d.path) && item.path != d.path)
         val revertPaths = items filterNot canSkip map (_.path)
-        val cmdLine = Seq("svn", "revert", "--remove-added", "--depth=infinity") ++ revertPaths
-        runCmd(cmdLine, Some(wcRoot))
+        svn.revert(revertPaths, removeAdded = true, cwd = Some(wcRoot))
       }
         
       //  Let the user know we finished successfully
