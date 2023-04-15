@@ -377,7 +377,7 @@ object Stash extends Command {
         
         addArgumentParser(stashRefParser)
         
-        banner = s"usage: $cmdPrefix [<options]"
+        banner = s"usage: $cmdPrefix [<options] [<stash-ref>]"
         separator("")
         separator(description)
         separator("Options:")
@@ -391,6 +391,7 @@ object Stash extends Command {
         arg[StashRef] { (ref, options) => options.copy(stashIndex = Some(ref.index)) }
 
         separator("")
+        separator("<stash-ref> can be 'stash-n' or simply 'n' where n is the stash number")
         separator("If you omit the stash-ref, stash-0 is used by default")
       }
 
@@ -461,6 +462,7 @@ object Stash extends Command {
         arg[StashRef] { (ref, options) => options.copy(stashIndex = Some(ref.index)) }
 
         separator("")
+        separator("<stash-ref> can be 'stash-n' or simply 'n' where n is the stash number")
         separator(s"If you omit the stash-ref, stash-0 is used by default")
       }
 
@@ -521,6 +523,7 @@ object Stash extends Command {
         arg[StashRef] { (ref, options) => options.copy(stashIndex = Some(ref.index)) }
 
         separator("")
+        separator("<stash-ref> can be 'stash-n' or simply 'n' where n is the stash number")
         separator(s"If you omit the stash-ref, stash-0 is used by default")
       }
 
@@ -569,6 +572,7 @@ object Stash extends Command {
         arg[StashRef] { (ref, options) => options.copy(stashIndex = Some(ref.index)) }
 
         separator("")
+        separator("<stash-ref> can be 'stash-n' or simply 'n' where n is the stash number")
         separator(s"If you omit the stash-ref, stash-0 is used by default")
       }
 
