@@ -44,19 +44,13 @@ object Branch extends Command {
       separator("Options:")
       
       optl[Regex]("-b", "--branches[=<regex>]", "Display list of branches in the repository") {
-        (regex, options) => 
-            if (regex.isEmpty)
-              options.copy(allBranches = true, branches = None)
-            else
-              options.copy(allBranches = false, branches = regex)
+        case (Some(regex), options) => options.copy(allBranches = false, branches = Some(regex))
+        case (None, options)        => options.copy(allBranches = true,  branches = None)
       }
           
       optl[Regex]("-t", "--tags[=<regex>]", "Display list of tags in the repository") {
-        (regex, options) => 
-          if (regex.isEmpty)
-            options.copy(allTags = true, tags = None)
-          else
-            options.copy(allTags = false, tags = regex)
+        case (Some(regex), options) => options.copy(allTags = false, tags = Some(regex))
+        case (None, options)        => options.copy(allTags = true,  tags = None)
       }
           
       flag("-h", "--help", "Show this message")
@@ -68,6 +62,7 @@ object Branch extends Command {
       separator("If neither of --branches or --tags is present, the current branch is displayed.")
       separator("If no <regex> is specified for --branches, --tags then all are listed.")
       separator("If <path> is omitted the current directory is used by default.")
+      separator("Use -- to separate the <path> from --branches or --tag with no <regex>")
       separator("Assumes the repository has standard /trunk, /branches, /tags structure.")
     }
     
@@ -79,7 +74,7 @@ object Branch extends Command {
     
     def listEntries(header: String, url: String, regex: Option[Regex]): Unit = {
       //  If the regex is empty the we are matching all entries
-      def acceptable(entry: ListEntry): Boolean = regex map (_.findFirstIn(entry.name).nonEmpty) getOrElse true
+      def acceptable(entry: ListEntry): Boolean = regex map (_.contains(entry.name)) getOrElse true
       println()
       println(header)
       println("--------------------")

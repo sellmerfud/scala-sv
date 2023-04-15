@@ -130,10 +130,10 @@ object svn {
       rootUrl               = (entry \ "repository" \ "root").head.text,
       repoUUID              = (entry \ "repository" \ "uuid").head.text,
       commitRev             = commit.attributes("revision").head.text,
-      commitAuthor          = (commit \ "author").head.text,
-      commitDate            = parseISODate((commit \ "date").head.text),
+      commitAuthor          = (commit \ "author").headOption map (_.text) getOrElse "n/a",
+      commitDate            = (commit \ "date").headOption map (d => parseISODate(d.text)) getOrElse NULL_DATETIME,
       workingCopyPath       = (entry \ "wc-info" \ "wcroot-abspath").headOption map (_.text),
-      workingCopyLastUpdate = (entry \ "wc-info" \ "text-updated").headOption map (x => parseISODate(x.text)))
+      workingCopyLastUpdate = (entry \ "wc-info" \ "text-updated").headOption map (d => parseISODate(d.text)))
   }
   
   //  Get info for a single path
@@ -219,8 +219,9 @@ object svn {
             kind         = entryNode.attributes("kind").head.text,
             size         = (entryNode \ "size").headOption map (_.text.toLong),
             commitRev    = commit.attributes("revision").head.text,
-            commitAuthor = (commit \ "author").headOption map (_.text) getOrElse "",
-            commitDate   = parseISODate((commit \ "date").head.text))
+            commitAuthor = (commit \ "author").headOption map (_.text) getOrElse "n/a",
+            commitDate   = (commit \ "date").headOption map (d => parseISODate(d.text)) getOrElse NULL_DATETIME
+          )
         }
         
         SvnList(path, entries)

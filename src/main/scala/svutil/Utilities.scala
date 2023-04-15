@@ -4,6 +4,7 @@ package svutil
 import java.util.Locale
 import java.time.format.DateTimeFormatter
 import scala.util.Properties.propOrElse
+import scala.util.matching.Regex
 import java.time._
 import java.io.File
 import scala.xml._
@@ -33,6 +34,10 @@ object Utilities {
     def isNumber = str forall (_.isDigit)
   }
 
+  implicit class RegexWrapper(r: Regex) {
+    def contains(source: CharSequence): Boolean = r.findFirstIn(source).nonEmpty
+  }
+  
   // Join paths returned by svn commands
   def joinPaths(base: String, others: String*): String = {
     val result = new StringBuilder(base.chomp("/"))

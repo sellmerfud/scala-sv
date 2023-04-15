@@ -18,9 +18,11 @@ object FileRevs extends Command {
   override val description = "Display commit revisions of files across tags and branches"
   
   case class Options(
-    branches:  Vector[Regex]  = Vector.empty,
-    tags:      Vector[Regex]  = Vector.empty,
-    paths:     Vector[String] = Vector.empty)
+    allBranches: Boolean        = false,
+    allTags:     Boolean        = false,
+    branches:    Vector[Regex]  = Vector.empty,
+    tags:        Vector[Regex]  = Vector.empty,
+    paths:       Vector[String] = Vector.empty)
   
   private def processCommandLine(args: Seq[String]): Options = {
     import org.sellmerfud.optparse._
@@ -39,11 +41,15 @@ object FileRevs extends Command {
       separator(description)
       separator("Options:")
       
-      reqd[Regex]("-b", "--branch=<regex>", "Specifiy branch(es) upon which to reference paths")
-          { (spec, options) => options.copy(branches = options.branches :+ spec) }
+      optl[Regex]("-b", "--branch[=<regex>]", "Specifiy branch(es) upon which to reference paths") {
+        case (Some(regex), options) => options.copy(branches = options.branches :+ regex)
+        case (None, options )       => options.copy(allBranches = true)
+      }
           
-      reqd[Regex]("-t", "--tag=<regex>", "Specifiy tag(s) upon which to reference paths")
-        { (spec, options) => options.copy(tags = options.tags :+ spec) }
+      optl[Regex]("-t", "--tag[=<regex>]", "Specifiy tag(s) upon which to reference paths") {
+        case (Some(regex), options) => options.copy(tags = options.tags :+ regex)
+        case (None, options)        => options.copy(allTags = true)
+      }
         
       flag("-h", "--help", "Show this message")
           { _ => println(help); throw HelpException() }
@@ -51,8 +57,10 @@ object FileRevs extends Command {
       arg[String] { (path, options) => options.copy(paths = options.paths :+ path) }  
         
       separator("")
-      separator("If no --branch or --tag is given, only the trunk revision is displayed.")
+      separator("If neither --branch nor --tag is given, only the trunk revision is displayed.")
       separator("--branch and --tag may be specified multiple times.")
+      separator("--branch or --tag without a <regex> will consider all branches or tags")
+      separator("Use -- to separate the <path> from --branches or --tag with no <regex>")
       separator("Assumes the repository has standard /trunk, /branches, /tags structure.")
     }
     
@@ -61,21 +69,27 @@ object FileRevs extends Command {
   
   
   private def getBranches(rootUrl: String, options: Options): List[ListEntry] = {
-    if (options.branches.isEmpty)
+    if (options.allBranches == false && options.branches.isEmpty)
       Nil
-    else
-      svn.pathList(joinPaths(rootUrl, "branches")).head.entries filter { entry =>
-        options.branches.exists(regex => regex.findFirstIn(entry.name).nonEmpty)
-      }
+    else {
+      val branchEntries = svn.pathList(joinPaths(rootUrl, "branches")).head.entries
+      if (options.allBranches)
+        branchEntries
+      else
+         branchEntries filter { entry => options.branches.exists(_.contains(entry.name)) }
+    }
   }
   
   private def getTags(rootUrl: String, options: Options): List[ListEntry] = {
-    if (options.tags.isEmpty)
+    if (options.allTags == false && options.tags.isEmpty)
       Nil
-    else
-      svn.pathList(joinPaths(rootUrl, "tags")).head.entries filter { entry =>
-        options.tags.exists(regex => regex.findFirstIn(entry.name).nonEmpty)
-      }
+    else {
+      val tagEntries = svn.pathList(joinPaths(rootUrl, "tags")).head.entries
+      if (options.allTags)
+        tagEntries
+      else
+        tagEntries filter { entry => options.tags.exists(_.contains(entry.name)) }
+    }
   }
   
   private def getTrunk(rootUrl: String): ListEntry = {
@@ -126,7 +140,7 @@ object FileRevs extends Command {
       val prefix    = pathPrefix(pathType, location)
       val entryPath = joinPaths(rootUrl, prefix, relPath)
       
-      Try(svn.info(entryPath)) match {
+      Try(svn.info(entryPath, Some("HEAD"))) match {
         case Success(info) => Result(prefix, Some(info))
         case Failure(e)    => Result(prefix, None)
       }

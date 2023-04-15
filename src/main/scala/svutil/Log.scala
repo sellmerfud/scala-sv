@@ -119,7 +119,7 @@ object Log extends Command {
         entries
       else entries filter { entry =>
         val msg = entry.msg.mkString("\n")
-        options.regexes exists (_.findFirstIn(msg).nonEmpty)
+        options.regexes exists (_.contains(msg))
       }
         
     val entries = matching(getLogEntries(options))
