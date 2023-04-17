@@ -42,21 +42,7 @@ object svn {
     // svn log entries
     // ==========================================
     case class FromPath(path: String, revision: String)
-    case class LogPath(path: String, kind: String, action: String, textMods: Boolean, propMods: Boolean, fromPath: Option[FromPath]) {
-      def formatted:String = {
-        val color = action match {
-          case "D" => red
-          case "A" => green
-          case "M" => purple
-          case _   => white
-        }
-        val from = fromPath match {
-          case Some(FromPath(path, revision)) => s"  (from ${path}:${revision})"
-          case None                           => ""
-        }
-        s"  ${color(action)} ${color(path)}${purple(from)}"
-      }
-    }
+    case class LogPath(path: String, kind: String, action: String, textMods: Boolean, propMods: Boolean, fromPath: Option[FromPath]) 
     case class LogEntry(revision: String, author: String, date: LocalDateTime, msg: Seq[String], paths: Seq[LogPath])
       
   

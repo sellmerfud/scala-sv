@@ -183,7 +183,7 @@ object Log extends Command {
         println(s"${prefix} ${msg1st}")
       
       if (options.showPaths)
-        logPaths foreach (p => println(p.formatted))
+        logPaths foreach (p => println(formattedLogPath(p)))
     }
   }
     

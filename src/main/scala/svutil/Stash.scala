@@ -71,7 +71,7 @@ object Stash extends Command {
     patchName: String,     // name of patch file for this stash relative to .sv/stash/
     items: Seq[StashItem]) {
       
-      def summary = s"${green(branch)}[${yellow(revision)}]: $description"
+      def summary = s"${green(branch)} ${yellow(revision)}: $description"
     }
 
   private object StashEntry {
@@ -355,7 +355,7 @@ object Stash extends Command {
       
       for ((stash, index) <- loadStashEntries().view.zipWithIndex) {
       
-        println(s"stash-$index, - ${stash.summary}")  
+        println(s"stash-$index - ${stash.summary}")  
       }
     }
   }

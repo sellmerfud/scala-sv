@@ -9,7 +9,7 @@ import java.time._
 import java.io.File
 import scala.xml._
 import Color._
-import svn.model.{ LogEntry }
+import svn.model.{ LogEntry, LogPath, FromPath }
 
 object Utilities {
 
@@ -103,6 +103,25 @@ object Utilities {
   }
   
   
+  def formattedLogPath(logPath: LogPath): String = {
+    val color = logPath.action match {
+      case "D" => red
+      case "A" => green
+      case "M" => purple
+      case _   => white
+    }
+
+    val base = s"  ${color(logPath.action)} ${color(logPath.path)}"
+    logPath.fromPath match {
+      case Some(FromPath(path, revision)) =>
+        val from = s" (from${purple(s" ${path}")} ${yellow(revision)})"
+        base + from
+        
+      case None =>
+        base
+    }
+  }
+  
   def showCommit(logEntry: LogEntry, showMsg: Boolean = true, showPaths: Boolean = true): Unit = {
     println("-------------------------------------------------------------------")
     println(s"Commit: ${yellow(logEntry.revision)}")
@@ -128,7 +147,7 @@ object Utilities {
       println(cyan(s"${amtOf(totals.mod, "file")} modified, ${totals.add} added, ${totals.del} deleted"))
     }
     if (showPaths)
-      logEntry.paths foreach (p => println(p.formatted))
+      logEntry.paths foreach (p => println(formattedLogPath(p)))
   }
   
   def printDiffLine(line: String): Unit = {
