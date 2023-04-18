@@ -203,7 +203,7 @@ object Stash extends Command {
         
     private def getLogMessage1st(wcRoot: os.Path): String = {
       val log = svn.log(Seq(wcRoot.toString), Seq("BASE:0"), limit = Some(1))
-      log.headOption flatMap (_.msg.headOption) getOrElse ""
+      log.headOption map (_.msg1st) getOrElse ""
     }
 
     //  Runs `svn status` on the working copy root directory

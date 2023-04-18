@@ -43,7 +43,9 @@ object svn {
     // ==========================================
     case class FromPath(path: String, revision: String)
     case class LogPath(path: String, kind: String, action: String, textMods: Boolean, propMods: Boolean, fromPath: Option[FromPath]) 
-    case class LogEntry(revision: String, author: String, date: LocalDateTime, msg: Seq[String], paths: Seq[LogPath])
+    case class LogEntry(revision: String, author: String, date: LocalDateTime, msg: Seq[String], paths: Seq[LogPath]) {
+      val msg1st = msg.headOption getOrElse ""
+    }
       
   
     // ==========================================
