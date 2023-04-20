@@ -80,7 +80,7 @@ object Log extends Command {
       flag("", "--reverse", "Output the chosen commits in the reverse order")
         { _.copy(reverse = true) }
       
-      flag("-i", "--incoming", "Display commits incoming with next update", "shorthand for -rHEAD:BASE")
+      flag("-i", "--incoming", "Display commits incoming with next update")
           { options => options.copy(incoming = true, revisions = options.revisions :+ "HEAD:BASE") }
 
       flag("", "--stop-on-copy", "Do not cross copies while traversing history")

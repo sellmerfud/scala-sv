@@ -4,7 +4,7 @@ package svutil
 import java.util.Locale
 import java.time.format.DateTimeFormatter
 import java.io.{ FileWriter, PrintWriter }
-import scala.util.Properties.{ propOrNone, envOrNone, isWin }
+import scala.util.Properties.{ propOrNone, envOrNone }
 import java.time._
 import scala.xml._
 import Utilities._

@@ -1,7 +1,31 @@
-#!/bin/sh
+#!/usr/bin/env sh
 
-# Modify this if you move the location of the jar file.
+# Environment variables and Java properties
+# (Environment variabes will override Java properties)
+
+# Prop: sv.svn
+# Env : SV_SVN 
+# By default the sv utility will run the svn client that is found on your $PATH
+# You can override this and set a specific path to the svn executable by using
+# the sv.svn property on the java command line below.
+# You can also set the SV_SVN enviroment variable.
+
+# Prop: sv.color
+# Env : SV_COLOR
+# By default the sv utility will output ANSI color sequences to add color to the
+# the output of some commands.  (Except on Windows where color is off by default)
+# You can override this by setting the property or environment variable to `yes` or `no`
+
+# Prop: sv.scriptname
+# This property is used by the utility when showing usage messages.  It allows you to
+# change the name of this script and still have the usage message correctly refer to
+# the name of the script that invoked it.
+# You can see its use in the java command below.
+
+
+# By default this script will look for the sv.jar file in the same directory
+# were this script is found.
+# Modify this variable if you change the location of the jar file.
 sv_jar="`dirname $0`/sv.jar"
 
-# The svuti.script.name is used when showing usage for --help options.
 java -D"sv.scriptname=$0" -jar "$sv_jar" "$@"
