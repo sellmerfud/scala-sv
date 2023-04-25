@@ -135,16 +135,17 @@ object Utilities {
     println()
     //  Path summary
     if (logEntry.paths.nonEmpty) {
-      case class Totals(mod: Int = 0, add: Int = 0, del: Int = 0)
+      case class Totals(mod: Int = 0, add: Int = 0, del: Int = 0, rep: Int = 0)
       val totals = logEntry.paths.foldLeft(Totals()) { (t, p) =>
         p.action match {
           case "M" => t.copy(mod = t.mod + 1)
           case "A" => t.copy(add = t.add + 1)
           case "D" => t.copy(del = t.del + 1)
+          case "R" => t.copy(rep = t.rep + 1)
           case _   => t
         }
       }
-      println(cyan(s"${amtOf(totals.mod, "file")} modified, ${totals.add} added, ${totals.del} deleted"))
+      println(cyan(s"${amtOf(totals.mod, "file")} modified, ${totals.add} added, ${totals.del} deleted, ${totals.rep} replaced"))
     }
     if (showPaths)
       logEntry.paths foreach (p => println(formattedLogPath(p)))

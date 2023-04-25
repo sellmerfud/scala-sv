@@ -89,8 +89,9 @@ object Show extends Command {
     val path = finalOptions.paths.headOption getOrElse "."
         
     getLogEntry(path, finalOptions) foreach { log =>
+      val info = svn.info(path, Some(log.revision))
       println()
-      println(blue(path))
+      println(s"${blue(path)} (Last changed: ${yellow(info.commitRev)})")
       showCommit(log, finalOptions.showMsg, finalOptions.showPaths)
       if (finalOptions.showDiff) {
         println()
