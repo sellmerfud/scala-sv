@@ -594,7 +594,7 @@ object Stash extends Command {
       // Remove the stash entry and save
       os.remove(stashPath / stash.patchName)
       saveStashEntries(stashList filterNot (_ == stash))
-      println(s"Droped ${stash.summary}")
+      println(s"Dropped ${stash.summary}")
     }
   }
   
