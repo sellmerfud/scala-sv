@@ -90,9 +90,9 @@ object svn {
       }
   }
 
-  //  Starting in the current working directory search for the top
+  //  Starting in the given working directory search for the top
   //  of the working copy.  The directory that contains the .svn directory.
-  def workingCopyRoot: Option[os.Path] = {
+  def workingCopyRoot(workingDir: os.Path = os.pwd): Option[os.Path] = {
       def findIt(path: os.Path): Option[os.Path] =
         (os.isDir(path / ".svn"), path.segmentCount) match {
           case (false, 0) => None
@@ -101,7 +101,7 @@ object svn {
         }
       
       // Start with the current working directory path
-      findIt(os.pwd)
+      findIt(workingDir)
   }
   
   
@@ -146,20 +146,25 @@ object svn {
 
   // Using svn info for the path, return the branch name and the current commit revision
   // Assumes the repo has the standard ^{trunk,branches,tags} structure
-  def currentBranch(path: String): (String, String) = {
+  def currentBranch(path: os.Path): (String, String) = {
 
-    val pathInfo = info(path)
-    val TRUNK    = """\^.*/trunk.*""".r
-    val BRANCH   = """\^.*/branches/([^/]+).*""".r
-    val TAG      = """\^.*/tags/([^/]+).*""".r
-    // Parse the XML log entries
-    val branch = pathInfo.relativeUrl match {
-      case TRUNK()      => "trunk"
-      case BRANCH(name) => s"$name"
-      case TAG(name)    => s"$name"
-      case _            => "cannot be determined"
+    workingCopyRoot(path) match {
+      case Some(wcRoot) => 
+        val pathInfo = info(wcRoot.toString)
+        // val TRUNK    = """\^.*/trunk.*""".r
+        // val BRANCH   = """\^.*/branches/([^/]+).*""".r
+        // val TAG      = """\^.*/tags/([^/]+).*""".r
+        // // Parse the XML log entries
+        // val branch = pathInfo.relativeUrl match {
+        //   case TRUNK()      => "trunk"
+        //   case BRANCH(name) => s"$name"
+        //   case TAG(name)    => s"$name"
+        //   case _            => "cannot be determined"
+        // }
+        (pathInfo.relativeUrl, pathInfo.commitRev)
+      case None =>
+        generalError(s"$path is not part of a subversion working copy")      
     }
-    (branch, pathInfo.commitRev)
   }
 
   

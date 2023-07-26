@@ -75,7 +75,7 @@ object Utilities {
   //  This gives sv commands a place to store data
   //  This will throw an error of the directory cannot be resloved.
   def getDataDirectory(): os.Path = {
-    val wcRoot  = svn.workingCopyRoot getOrElse {
+    val wcRoot  = svn.workingCopyRoot() getOrElse {
       generalError(s"You must run this command from within a subversion working copy directory")
     }
     

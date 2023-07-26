@@ -100,7 +100,11 @@ object Branch extends Command {
   }
   
   private def showCurrentBranch(options: Options): Unit = {
-    val (branch, revision) = svn.currentBranch(options.path)
+    if (options.path.startsWith("^") || options.path.contains("://"))
+      generalError("Cannot show the currernt branh of a URL")
+    val p = new java.io.File(options.path)
+    val path = if (p.isAbsolute) os.Path(p) else os.pwd / os.RelPath(p)
+    val (branch, revision) = svn.currentBranch(path)
     println(s"Current branch: ${green(branch)} [${yellow(revision)}]")
   }
   

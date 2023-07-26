@@ -6,7 +6,6 @@ import scala.util.matching.Regex
 import java.util.regex.PatternSyntaxException
 import java.time.LocalDateTime
 import java.util.UUID
-import scala.jdk.CollectionConverters._
 import upickle.default.{ read, writeToOutputStream, ReadWriter => RW, macroRW, readwriter }
 import scala.xml._
 import org.sellmerfud.optparse._
@@ -278,13 +277,13 @@ object Stash extends Command {
     override def run(args: Seq[String]): Unit = {
       val options = processCommandLine(args)
       svn.workingCopyInfo  // Make sure the current directory is in a subversion working copy
-      val wcRoot  = svn.workingCopyRoot.get  // All commands will be run from the top dir
+      val wcRoot  = svn.workingCopyRoot().get  // All commands will be run from the top dir
       val items   = getStashItems(wcRoot, options.unversioned)
       
       if (items.isEmpty)
         successExit("No local changes to save")
       
-      val (branch, revision) = svn.currentBranch(wcRoot.toString)
+      val (branch, revision) = svn.currentBranch(wcRoot)
       val description        = options.description getOrElse getLogMessage1st(wcRoot)
       
       val patchName = createPatchName()
@@ -401,7 +400,7 @@ object Stash extends Command {
     override def run(args: Seq[String]): Unit = {
       val options    = processCommandLine(args)
       svn.workingCopyInfo  // Make sure the current directory is in a subversion working copy
-      val wcRoot     = svn.workingCopyRoot.get  // All commands will be run from the top dir
+      val wcRoot     = svn.workingCopyRoot().get  // All commands will be run from the top dir
       val index      = options.stashIndex getOrElse 0
       val stashList  = loadStashEntries()
       val stash      = if (stashList.size >= index + 1)
@@ -472,7 +471,7 @@ object Stash extends Command {
     override def run(args: Seq[String]): Unit = {
       val options    = processCommandLine(args)
       svn.workingCopyInfo  // Make sure the current directory is in a subversion working copy
-      val wcRoot     = svn.workingCopyRoot.get  // All commands will be run from the top dir
+      val wcRoot     = svn.workingCopyRoot().get  // All commands will be run from the top dir
       val index      = options.stashIndex getOrElse 0
       val stashList  = loadStashEntries()
       val stash      = if (stashList.size >= index + 1)
@@ -533,7 +532,7 @@ object Stash extends Command {
     override def run(args: Seq[String]): Unit = {
       val options    = processCommandLine(args)
       svn.workingCopyInfo  // Make sure the current directory is in a subversion working copy
-      val wcRoot     = svn.workingCopyRoot.get  // All commands will be run from the top dir
+      val wcRoot     = svn.workingCopyRoot().get  // All commands will be run from the top dir
       val index      = options.stashIndex getOrElse 0
       val stashList  = loadStashEntries()
       val stash      = if (stashList.size >= index + 1)
@@ -582,7 +581,7 @@ object Stash extends Command {
     override def run(args: Seq[String]): Unit = {
       val options    = processCommandLine(args)
       svn.workingCopyInfo  // Make sure the current directory is in a subversion working copy
-      val wcRoot     = svn.workingCopyRoot.get  // All commands will be run from the top dir
+      val wcRoot     = svn.workingCopyRoot().get  // All commands will be run from the top dir
       val index      = options.stashIndex getOrElse 0
       val stashList  = loadStashEntries()
       val stash      = if (stashList.size >= index + 1)

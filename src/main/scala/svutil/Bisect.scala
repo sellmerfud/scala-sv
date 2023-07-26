@@ -5,7 +5,6 @@ package svutil
 import java.io.{ File, FileWriter, PrintWriter,  FileReader, BufferedReader }
 import java.time._
 import scala.xml._
-import scala.jdk.CollectionConverters._
 import scala.xml._
 import scala.util.{ Try, Success, Failure }
 import upickle.default.{ read, writeToOutputStream, ReadWriter => RW, macroRW, readwriter }
