@@ -13,7 +13,10 @@ object Show extends Command {
   
   override val name = "show"
   override val description = "Show the details of a given revision"
-  
+
+  val REV = """^(\d+|HEAD|BASE|PREV|COMMITTED)(?:([-+])(\d+))?$""".r
+  def looksLikeRevision(str: String): Boolean = REV matches str
+    
   case class Options(
     revision:  Option[String] = None,
     paths:     Vector[String] = Vector.empty,
@@ -32,7 +35,12 @@ object Show extends Command {
       separator("Options:")
       
       reqd[String]("-r", "--revision=<revision>", "Repository revision of the commit to show")
-        { (rev, options) => options.copy(revision = Some(rev)) }
+        { (rev, options) =>
+          if (looksLikeRevision(rev))
+            options.copy(revision = Some(rev))
+          else
+              throw new InvalidArgumentException(" is not a valid revision argument")
+        }
 
       bool("-m", "--message", "Show the commit message (default yes)")
         { (value, options) => options.copy(showMsg = value) }
@@ -61,6 +69,19 @@ object Show extends Command {
     parser.parse(args, Options())
   }
   
+  private def resolveRevision(revString: String, path: String): String = {
+    revString match {
+      case REV(rev, null, null) =>
+        rev
+      case REV(rev, op, delta) =>
+        val revs  = Seq(if (op == "-") s"$rev:0" else s"$rev:HEAD")
+        val limit = Some(delta.toInt + 1)
+        val entries = svn.log(paths = Seq(path), revisions = revs, limit = limit, includeMessage = false)
+        entries.last.revision
+      case _ =>
+        generalError(s"Cannot resolve revision from $revString for path ($path)")
+    }
+  }
 
   private def getLogEntry(path: String, options: Options): Option[LogEntry] = {
     //  In some cases when the revision is PREV, it may not produce a log entry 
@@ -69,13 +90,11 @@ object Show extends Command {
     val fixRev   = (rev: String) => if (rev contains ':') rev else s"$rev:0"
     svn.log(
       paths        = Seq(path),
-      revisions    = options.revision.toSeq map fixRev,
+      revisions    = options.revision.toSeq map { r => fixRev(resolveRevision(r, path)) },
       limit        = Some(1),
       includePaths = true
     ).headOption
   }
-  
-  def looksLikeRevision(str: String): Boolean = """^(\d+|HEAD|BASE|PREV|COMMITTED)$""".r matches str
   
   override def run(args: Seq[String]): Unit = {
     val options = processCommandLine(args)

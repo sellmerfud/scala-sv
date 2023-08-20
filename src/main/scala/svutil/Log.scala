@@ -186,34 +186,51 @@ object Log extends Command {
         logPaths foreach (p => println(formattedLogPath(p)))
     }
   }
+
+  //  We allow revisions like:
+  //    HEAD, 33, 878
+  //    HEAD:33    (range)
+  //    HEAD-3     (three revisions before HEAD)
+  //    556+2      (two revisions after 556)
+  val REV = """^(\d+|HEAD|BASE|PREV|COMMITTED)(?::(\d+|HEAD|BASE|PREV|COMMITTED)|([+-])(\d+))?$$""".r
     
-  def looksLikeRevision(str: String): Boolean = {
-   val revPart = """(?:\d+|HEAD|BASE|PREV|COMMITTED)""".r
-   s"""^$revPart(?::$revPart)?$$""".r matches str 
+  private def looksLikeRevision(str: String): Boolean = { REV matches str }
+
+  private def resolveRevision(revString: String, path: String): String = {
+    revString match {
+      case REV(rev, null, null, null) =>
+        revString
+      case REV(rev1, rev2, null, null) =>
+        revString
+      case REV(rev, null, op, delta) =>
+        val revs  = Seq(if (op == "-") s"$rev:0" else s"$rev:HEAD")
+        val limit = Some(delta.toInt + 1)
+        val entries = svn.log(paths = Seq(path), revisions = revs, limit = limit, includeMessage = false)
+        entries.last.revision
+      case _ =>
+        generalError(s"Cannot resolve revision from $revString for path ($path)")
+    }
   }
-    
+  
+  
   def getLogEntries(options: Options): Seq[LogEntry] = {
     //  If no revisions are specified and the first 'path' looks like a revision
     //  then treat it as one, appending :0 if it does not have a range.
-    //
+    val (paths, revisions) = if (options.revisions.isEmpty && options.paths.nonEmpty && looksLikeRevision(options.paths.head))
+    (options.paths.tail, Vector(options.paths.head))
+    else
+      (options.paths, options.revisions)
+    val resolvedRevs = revisions map { r => resolveRevision(r, paths.headOption getOrElse ".") }
     //  If only a single revision is specified and it does not contain
     //  a range,then we add :0 so that we get the log starting from that point.
-    val (paths, revisions) = if (options.revisions.isEmpty && options.paths.nonEmpty && looksLikeRevision(options.paths.head)) {
-      val rev = options.paths.head
-      val fullRev = if (rev contains ':') rev else s"$rev:0"
-      (options.paths.tail, Vector(fullRev))
-    }
-    else {
-      val revs = if (options.revisions.size == 1 && !(options.revisions.head contains ':'))
-        Vector(s"${options.revisions.head}:0")
-      else
-        options.revisions
-      (options.paths, revs)
-    }  
+    val finalRevs = if (resolvedRevs.size == 1 && !(resolvedRevs.head contains ':'))
+        Vector(s"${resolvedRevs.head}:0")
+    else
+      resolvedRevs
     
     svn.log(
       paths         = paths,
-      revisions     = revisions,
+      revisions     = finalRevs,
       limit         = options.limit,
       includePaths  = options.showPaths,
       stopOnCopy    = options.noCopy,
