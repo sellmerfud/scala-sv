@@ -974,7 +974,7 @@ object Bisect extends Command {
                     
     println(help1)
     for (c <- bisectCommands)
-      println(f"$sv ${c.cmdName}%-8s  ${c.description}")
+      println(f"$sv bisect ${c.cmdName}%-8s  ${c.description}")
     println(help2)
     
     

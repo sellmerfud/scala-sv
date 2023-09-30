@@ -649,7 +649,7 @@ object Stash extends Command {
                     
     println(help1)
     for (c <- stashCommands)
-      println(f"$sv ${c.cmdName}%-8s  ${c.description}")
+      println(f"$sv stash ${c.cmdName}%-8s  ${c.description}")
     println(help2)
     throw HelpException()
   }
