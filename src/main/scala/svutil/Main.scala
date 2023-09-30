@@ -33,7 +33,18 @@ object Main {
     }
   }
   
-  lazy val commands = Log::Branch::Show::FileRevs::Stash::Bisect::Ignore :: Nil
+  object Help extends Command {
+    override val name = "help"
+    override val description = "Display help information"
+    override def run(args: Seq[String]): Unit = {
+        (args.headOption map matchCommand) match {
+        case Some(cmd::Nil) => Try(cmd.run(Seq("--help")))
+        case _ => showHelp()
+      }
+    }
+  }
+
+  lazy val commands = Log::Branch::Show::FileRevs::Stash::Bisect::Ignore::Help::Nil
   
   def showHelp(): Unit = {
     val usage = s"""|usage: $scriptName <command> [<args>]
@@ -72,13 +83,6 @@ object Main {
     }
     else if ((mainOpts contains "--help") || (mainOpts contains "-h")) {
       showHelp()
-      STATUS_OK
-    }
-    else if (cmdName == "help") {
-      (cmdArgs.drop(1).headOption map matchCommand) match {
-          case Some(cmd::Nil) => Try(cmd.run(Seq("--help")))
-          case _ =>showHelp()
-      }
       STATUS_OK
     }
     else {

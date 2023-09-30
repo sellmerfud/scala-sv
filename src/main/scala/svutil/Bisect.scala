@@ -285,7 +285,21 @@ object Bisect extends Command {
     val description: String
     def run(args: Seq[String]): Unit
   }
-  
+
+
+  // == Help Command ====================================================
+    private case object Help extends BisectCommand {
+    override val cmdName = "help"
+    override val description = "Display help information"
+    override def run(args: Seq[String]): Unit = {
+      val getCmd = (name: String)  => getBisectCommand(name, None, None)
+        (args.headOption map getCmd) match {
+        case Some(cmd) => cmd.run(Seq("--help"))
+        case _ => showHelp()
+      }
+    }
+  }
+
   // == Start Command ====================================================
   private case object Start extends BisectCommand {
     override val cmdName = "start"
@@ -955,7 +969,7 @@ object Bisect extends Command {
   }
     
     
-  private val bisectCommands = Start::Bad::Good::Terms::Skip::Unskip::Run::Log::Replay::Reset::Nil
+  private val bisectCommands = Start::Bad::Good::Terms::Skip::Unskip::Run::Log::Replay::Reset::Help::Nil
   
   private def matchCommand(cmdName: String, cmdList: List[String]): List[String] = {
     if ("""^[a-zA-Z][-a-zA-Z0-9_]*""".r matches cmdName)
@@ -998,7 +1012,7 @@ object Bisect extends Command {
   // Main entry point to bisect commnad
   override def run(args: Seq[String]): Unit = {
 
-    if (args.isEmpty || args.head == "help" || args.head == "--help")
+    if (args.isEmpty || args.head == "--help" || args.head == "-h")
       showHelp();
     else {
       val (badOverride, goodOverride) = if (svn.inWorkingCopy) {

@@ -23,6 +23,17 @@ object Stash extends Command {
     def run(args: Seq[String]): Unit
   }
 
+  private case object Help extends StashCommand {
+    override val cmdName = "help"
+    override val description = "Display help information"
+    override def run(args: Seq[String]): Unit = {
+        (args.headOption map getStashCommand) match {
+        case Some(cmd) => cmd.run(Seq("--help"))
+        case _ => showHelp()
+      }
+    }
+  }
+
   // Values for the items in svn status
   private val UNVERSIONED = "unversioned"
   private val NORMAL      = "normal"
@@ -634,7 +645,7 @@ object Stash extends Command {
     }
   }
   
-  private val stashCommands = Push::List::Pop::Apply::Drop::Show::Clear::Nil
+  private val stashCommands = Push::List::Pop::Apply::Drop::Show::Clear::Help::Nil
 
      
   private def showHelp(): Nothing = {
@@ -676,7 +687,7 @@ object Stash extends Command {
   // Main entry point to bisect commnad
   override def run(args: Seq[String]): Unit = {
 
-    if (args.nonEmpty && (args.head == "help" || args.head == "--help" || args.head == "-h"))
+    if (args.nonEmpty && (args.head == "--help" || args.head == "-h"))
       showHelp();
     else if (args.isEmpty || (args.head.startsWith("-") && args.head != "--"))
       Push.run(args)
