@@ -89,7 +89,7 @@ object Main {
       matchCommand(cmdName) match {
         case command :: Nil =>
           try {
-            command.run(cmdArgs.tail)
+            command.run(cmdArgs drop 1)
             STATUS_OK
           }
           catch {
