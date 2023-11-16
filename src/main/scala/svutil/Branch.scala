@@ -15,11 +15,14 @@ object Branch extends Command {
   override val description = "Display current branch or list branches"
   
   case class Options(
-    allBranches: Boolean       = false,
-    branches:    Option[Regex] = None,
-    allTags:     Boolean       = false,
-    tags:        Option[Regex] = None,
-    path:        String        = ".") {
+    allBranches: Boolean        = false,
+    branches:    Option[Regex]  = None,
+    allTags:     Boolean        = false,
+    tags:        Option[Regex]  = None,
+    addPrefixes: Vector[String] = Vector.empty,
+    remPrefixes: Vector[String] = Vector.empty,
+    listPrefixes: Boolean       = false,
+    path:        String         = ".") {
   
     def listBranches = allBranches || branches.nonEmpty
     def listTags     = allTags     || tags.nonEmpty
@@ -53,6 +56,27 @@ object Branch extends Command {
         case (None, options)        => options.copy(allTags = true,  tags = None)
       }
           
+      reqd[String]("-a", "--add-prefix=<prefix>", "Add a branch prefix") {
+        (prefix, options) =>
+        if (!prefix.startsWith("^/"))
+          throw new InvalidArgumentException("Branch prefix must start with ^/")
+        val cleanPrefix = prefix.substring(2).chomp("/")
+        options.copy(addPrefixes = options.addPrefixes :+ cleanPrefix)
+      }
+
+      reqd[String]("-d", "--delete-prefix=<prefix>", "Delete a branch prefix") {
+        (prefix, options) =>
+        if (!prefix.startsWith("^/"))
+          throw new InvalidArgumentException("Branch prefix must start with ^/")
+        val cleanPrefix = prefix.substring(2).chomp("/")
+        options.copy(remPrefixes = options.remPrefixes :+ cleanPrefix)
+      }
+
+      flag("-l", "--list-prefix", "List all branch prefixes") {
+        (options) =>
+        options.copy(listPrefixes = true)
+      }
+
       flag("-h", "--help", "Show this message")
           { _ => println(help); throw HelpException() }
     
@@ -69,34 +93,62 @@ object Branch extends Command {
     parser.parse(args, Options())
   }
   
-  
+  private def prefixOperations(options: Options): Unit = {
+
+    if (options.addPrefixes.nonEmpty || options.remPrefixes.nonEmpty) {
+      var prefixes = svn.loadBranchPrefixes()
+
+      prefixes = prefixes :++ options.addPrefixes
+      prefixes = prefixes.filterNot { prefix =>
+        options.remPrefixes.contains(prefix)
+      }
+      svn.saveBranchPrefixes(prefixes)
+    }
+    
+    if (options.listPrefixes)
+      for (prefix <- svn.getBranchPrefixes())
+        println(s"^/$prefix")
+  }
+
   private def showList(options: Options): Unit = {
     
-    def listEntries(header: String, url: String, regex: Option[Regex]): Unit = {
+    def listEntries(header: String, baseUrl: String, prefixes: List[String], regex: Option[Regex]): Unit = {
+      //  We skip entries that match branch prefixes.
       //  If the regex is empty the we are matching all entries
-      def acceptable(entry: ListEntry): Boolean = regex map (_.contains(entry.name)) getOrElse true
+      def acceptable(branch: String): Boolean = {
+        !prefixes.contains(branch)  &&   // 
+        (regex map (_.contains(branch)) getOrElse true)
+      }
       println()
       println(header)
       println("--------------------")
       
-      val x = svn.pathList(url)
-      svn.pathList(url).head.entries filter acceptable foreach { entry =>
-        println(green(entry.name))
+      for {
+        prefix <- prefixes
+        entry  <- svn.pathList(joinPaths(baseUrl, prefix)).head.entries
+        branch = joinPaths(prefix, entry.name)
+        if acceptable(branch)
+      } {
+        println(green(joinPaths("^", branch)))
       }
     }
     
-    val baseMatch = """(.*?)/(?:trunk|branches|tags)(?:/.*)?""".r
-    val baseUrl = svn.info(options.path).url match {
+    def baseUrl: String = {
+      val branches = svn.getBranchPrefixesSorted().mkString("|")
+      
+      val baseMatch = s"""(.*?)/(?:trunk|$branches|tags)(?:/.*)?""".r
+      svn.info(options.path).url match {
         case baseMatch(base) => base
         case _               => generalError(s"Cannot find the '$name' directory for the repository")
       }
+    }
     
         
     if (options.listBranches)
-      listEntries("Branches", s"$baseUrl/branches", options.branches)
+      listEntries("Branches", baseUrl, svn.getBranchPrefixes().sorted, options.branches)
     
     if (options.listTags)
-      listEntries("Tags", s"$baseUrl/tags", options.tags)
+      listEntries("Tags", baseUrl, List("tags"), options.tags)
   }
   
   private def showCurrentBranch(options: Options): Unit = {
@@ -110,8 +162,11 @@ object Branch extends Command {
   
   override def run(args: Seq[String]): Unit = {
     val options = processCommandLine(args)
-    
-    if (options.listBranches || options.listTags)
+    //  If one or more of the prefix options has been given
+    //  then we only operate on prefixes
+    if (options.addPrefixes.nonEmpty || options.remPrefixes.nonEmpty || options.listPrefixes)
+      prefixOperations(options)
+    else if (options.listBranches || options.listTags)
       showList(options)
     else
       showCurrentBranch(options)

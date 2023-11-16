@@ -9,6 +9,7 @@ import java.time._
 import scala.xml._
 import Utilities._
 import Color._
+import upickle.default.{ read, writeToOutputStream, ReadWriter => RW, macroRW, readwriter }
 
 //  Functions that execute svn and parse the results.
 object svn {
@@ -145,22 +146,11 @@ object svn {
 
 
   // Using svn info for the path, return the branch name and the current commit revision
-  // Assumes the repo has the standard ^{trunk,branches,tags} structure
   def currentBranch(path: os.Path): (String, String) = {
 
     workingCopyRoot(path) match {
       case Some(wcRoot) => 
         val pathInfo = info(wcRoot.toString)
-        // val TRUNK    = """\^.*/trunk.*""".r
-        // val BRANCH   = """\^.*/branches/([^/]+).*""".r
-        // val TAG      = """\^.*/tags/([^/]+).*""".r
-        // // Parse the XML log entries
-        // val branch = pathInfo.relativeUrl match {
-        //   case TRUNK()      => "trunk"
-        //   case BRANCH(name) => s"$name"
-        //   case TAG(name)    => s"$name"
-        //   case _            => "cannot be determined"
-        // }
         (pathInfo.relativeUrl, pathInfo.commitRev)
       case None =>
         generalError(s"$path is not part of a subversion working copy")      
@@ -317,6 +307,47 @@ object svn {
     runCmd(cmdLine, cwd)        
   }
     
-}
+  //  Normally branches are in ^/branches/...
+  //  We allow the user to set custom branch prefixes so that
+  //  we can find branches in non-standard locations
+  //  such as ^/branches/curt, or ^/other_branches
+  //  The branch prefixes are stored in .sv/branch_prefixes.json
+  
+  private def branchPrefixesFile = getDataDirectory() / "branch_prefixes.json"
 
+  def loadBranchPrefixes(): List[String] = {
+    if (os.isFile(branchPrefixesFile)) {
+      try read[List[String]](branchPrefixesFile.toIO)
+      catch {
+        case e: Throwable => 
+          generalError(s"Error branch prefixes ($branchPrefixesFile): ${e.getMessage}")
+      }
+    }
+    else
+      Nil
+  }
+  
+  def saveBranchPrefixes(branchPrefixes: List[String]): Unit = {
+    try {
+      val ostream = os.write.over.outputStream(branchPrefixesFile)
+      try writeToOutputStream(branchPrefixes, ostream, indent = 2)
+      finally ostream.close()
+    }
+    catch {
+      case e: Throwable =>
+        generalError(s"Error branch prefixes ($branchPrefixesFile): ${e.getMessage}")
+    }
+  }  
+
+  //  Returns the list of branch prefixes.
+  //  If the user has not created custom branch prefixes
+  //  then we return the default prefix: branches
+  def getBranchPrefixes(): List[String] = loadBranchPrefixes() match {
+    case Nil => "branches"::Nil
+    case list => list
+  }
+
+  // Returns the branch prefixes sorted by length. Longest first.
+  def getBranchPrefixesSorted(): List[String] = getBranchPrefixes().sortBy(p => -p.length)
+}
 

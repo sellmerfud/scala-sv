@@ -1,5 +1,5 @@
 target/
-games/
+test/
 NOTES.txt
 project/project/
 project/metals.sbt

@@ -68,50 +68,56 @@ object FileRevs extends Command {
   }
   
   
-  private def getBranches(rootUrl: String, options: Options): List[ListEntry] = {
+  private def getBranches(rootUrl: String, options: Options): List[String] = {
     if (options.allBranches == false && options.branches.isEmpty)
       Nil
     else {
-      val branchEntries = svn.pathList(joinPaths(rootUrl, "branches")).head.entries
-      if (options.allBranches)
-        branchEntries
-      else
-         branchEntries filter { entry => options.branches.exists(_.contains(entry.name)) }
+      val prefixes = svn.getBranchPrefixes().sorted
+      def acceptable(branch: String): Boolean = {
+        !prefixes.contains(branch)  &&
+        (options.allBranches || (options.branches.exists(_.contains(branch))))
+      }
+      for {
+        prefix <- prefixes
+        entry  <- svn.pathList(joinPaths(rootUrl, prefix)).head.entries
+        branch = joinPaths(prefix, entry.name)
+        if acceptable(branch)
+      } yield branch
     }
   }
   
-  private def getTags(rootUrl: String, options: Options): List[ListEntry] = {
+  private def getTags(rootUrl: String, options: Options): List[String] = {
     if (options.allTags == false && options.tags.isEmpty)
       Nil
     else {
       val tagEntries = svn.pathList(joinPaths(rootUrl, "tags")).head.entries
       if (options.allTags)
-        tagEntries
+        tagEntries map (e => s"tags/${e.name}")
       else
-        tagEntries filter { entry => options.tags.exists(_.contains(entry.name)) }
+        tagEntries filter { entry => options.tags.exists(_.contains(entry.name)) } map (e => s"tags/${e.name}")
     }
   }
   
-  private def getTrunk(rootUrl: String): ListEntry = {
-    svn.pathList(rootUrl).head.entries find (_.name == "trunk") getOrElse {
+  private def getTrunk(rootUrl: String): String = {
+    if (svn.pathList(rootUrl).head.entries exists (_.name == "trunk"))
+      "trunk"
+    else
       generalError(s"Cannot find repository trunk: ${joinPaths(rootUrl, "trunk")}")
-    }
   }
   
-  private def relativePath(info: SvnInfo): String = {
-    val trunk = """\^/trunk/(.*)""".r
-    val other = """\^/(?:branches|tags)/[^/]+/(.*)""".r
-    (info.relativeUrl) match {
-      case trunk(path) => path
-      case other(path) => path
-      case _           => generalError(s"Cannot determine relative path for ${info.relativeUrl}")
+  //  We must determine the path to the file relative
+  //  to its subversion prefix, where the prefix is one of:
+  //    ^/trunk
+  //    ^/tags/<tag-name>
+  //    ^/<branch-prefix>/<branch-name>
+  //  
+  private def getSvnRelativePath(relativeUrl: String, locations: List[String]): String = {
+    val sortedLocs = locations.sortBy(s => -s.length)
+
+    sortedLocs find (loc => relativeUrl.startsWith(s"^/$loc")) match {
+      case Some(loc) => relativeUrl.substring(loc.length + 3)
+      case None => generalError(s"Cannot determine relative path for $relativeUrl")
     }
-  }
-  
-  private def pathPrefix(pathType: String, entry: ListEntry): String = pathType match {
-    case "trunk"             => "trunk"
-    case "branches" | "tags" => joinPaths(pathType, entry.name)
-    case _                   => generalError(s"Invalid path type: $pathType")
   }
   
   private def maxWidth(seq: Seq[String]) = seq.foldLeft(0) ((maxLen, str) => str.length max maxLen)
@@ -131,18 +137,16 @@ object FileRevs extends Command {
   // tags/8.1.1-GA       7625
   // 7630                7630
   
-  private def showResults(rootUrl: String, pathEntry: SvnInfo, trunk: ListEntry, branches: List[ListEntry], tags: List[ListEntry]): Unit = {
+  private def showResults(rootUrl: String, pathEntry: SvnInfo, locations: List[String]): Unit = {
     case class Result(locationName: String, info: Option[SvnInfo])
-    val relPath = relativePath(pathEntry)
-    val locations = ("trunk" -> trunk) :: (branches map ("branches" -> _)) ::: (tags map ("tags" -> _))
-
-    val results = for ((pathType, location) <- locations) yield {
-      val prefix    = pathPrefix(pathType, location)
-      val entryPath = joinPaths(rootUrl, prefix, relPath)
+    val relPath = getSvnRelativePath(pathEntry.relativeUrl, locations)
+    println(s"DEBUG: relativeUrl=${pathEntry.relativeUrl}, relPath=$relPath")
+    val results = for (location <- locations) yield {
+      val entryPath = joinPaths(rootUrl, location, relPath)
       
       Try(svn.info(entryPath, Some("HEAD"))) match {
-        case Success(info) => Result(prefix, Some(info))
-        case Failure(e)    => Result(prefix, None)
+        case Success(info) => Result(s"^/$location", Some(info))
+        case Failure(e)    => Result(s"^/$location", None)
       }
     }
     
@@ -192,9 +196,7 @@ object FileRevs extends Command {
         print(formatField(size, SizeWidth, true)); println()
     }
   }
-  
-  
-  
+    
   override def run(args: Seq[String]): Unit = {
     val options = processCommandLine(args)
     
@@ -208,11 +210,9 @@ object FileRevs extends Command {
       generalError("All paths must refer to the same repository.")
     
     val rootUrl  = pathList.head.rootUrl
-    val trunk    = getTrunk(rootUrl)
-    val tags     = getTags(rootUrl, options)
-    val branches = getBranches(rootUrl, options)
+    val locations = getTrunk(rootUrl) :: getBranches(rootUrl, options) ::: getTags(rootUrl, options)
     
     for (pathEntry <- pathList)
-      showResults(rootUrl, pathEntry, trunk, branches, tags)
+      showResults(rootUrl, pathEntry, locations)
   } 
 }
