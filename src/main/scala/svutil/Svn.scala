@@ -328,9 +328,13 @@ object svn {
   }
   
   def saveBranchPrefixes(branchPrefixes: List[String]): Unit = {
+    val prefixes = branchPrefixes match {
+      case Nil => List("branches")
+      case list => list
+    }
     try {
       val ostream = os.write.over.outputStream(branchPrefixesFile)
-      try writeToOutputStream(branchPrefixes, ostream, indent = 2)
+      try writeToOutputStream(prefixes.distinct, ostream, indent = 2)
       finally ostream.close()
     }
     catch {
