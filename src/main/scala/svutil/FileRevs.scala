@@ -140,7 +140,6 @@ object FileRevs extends Command {
   private def showResults(rootUrl: String, pathEntry: SvnInfo, locations: List[String]): Unit = {
     case class Result(locationName: String, info: Option[SvnInfo])
     val relPath = getSvnRelativePath(pathEntry.relativeUrl, locations)
-    println(s"DEBUG: relativeUrl=${pathEntry.relativeUrl}, relPath=$relPath")
     val results = for (location <- locations) yield {
       val entryPath = joinPaths(rootUrl, location, relPath)
       
