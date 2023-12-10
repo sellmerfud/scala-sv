@@ -107,7 +107,7 @@ object Utilities {
     val color = logPath.action match {
       case "D" => red
       case "A" => green
-      case "M" => purple
+      case "M" => blue
       case _   => white
     }
 
