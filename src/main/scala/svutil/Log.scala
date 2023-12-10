@@ -176,6 +176,7 @@ object Log extends Command {
       val prefix   = buildPrefix(revision, author, date)
 
       if (options.full) {
+        println()
         println(prefix)
         fullMsg foreach (line => println(s"  $line"))
       }
