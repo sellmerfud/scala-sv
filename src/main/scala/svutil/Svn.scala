@@ -312,8 +312,10 @@ object svn {
   //  we can find branches in non-standard locations
   //  such as ^/branches/curt, or ^/other_branches
   //  The branch prefixes are stored in .sv/branch_prefixes.json
+  //  Same goes for ^/tags
   
   private def branchPrefixesFile = getDataDirectory() / "branch_prefixes.json"
+  private def tagPrefixesFile    = getDataDirectory() / "tag_prefixes.json"
 
   def loadBranchPrefixes(): List[String] = {
     if (os.isFile(branchPrefixesFile)) {
@@ -343,6 +345,34 @@ object svn {
     }
   }  
 
+  def loadTagPrefixes(): List[String] = {
+    if (os.isFile(tagPrefixesFile)) {
+      try read[List[String]](tagPrefixesFile.toIO)
+      catch {
+        case e: Throwable => 
+          generalError(s"Error tag prefixes ($tagPrefixesFile): ${e.getMessage}")
+      }
+    }
+    else
+      Nil
+  }
+  
+  def saveTagPrefixes(tagPrefixes: List[String]): Unit = {
+    val prefixes = tagPrefixes match {
+      case Nil => List("tags")
+      case list => list
+    }
+    try {
+      val ostream = os.write.over.outputStream(tagPrefixesFile)
+      try writeToOutputStream(prefixes.distinct, ostream, indent = 2)
+      finally ostream.close()
+    }
+    catch {
+      case e: Throwable =>
+        generalError(s"Error tag prefixes ($tagPrefixesFile): ${e.getMessage}")
+    }
+  }  
+
   //  Returns the list of branch prefixes.
   //  If the user has not created custom branch prefixes
   //  then we return the default prefix: branches
@@ -350,8 +380,14 @@ object svn {
     case Nil => "branches"::Nil
     case list => list
   }
+  
+  //  Returns the list of tag prefixes.
+  //  If the user has not created custom tag prefixes
+  //  then we return the default prefix: tags
+  def getTagPrefixes(): List[String] = loadTagPrefixes() match {
+    case Nil => "tags"::Nil
+    case list => list
+  }
 
-  // Returns the branch prefixes sorted by length. Longest first.
-  def getBranchPrefixesSorted(): List[String] = getBranchPrefixes().sortBy(p => -p.length)
 }
 

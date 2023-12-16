@@ -61,7 +61,6 @@ object FileRevs extends Command {
       separator("--branch and --tag may be specified multiple times.")
       separator("--branch or --tag without a <regex> will consider all branches or tags")
       separator("Use -- to separate the <path> from --branches or --tag with no <regex>")
-      separator("Assumes the repository has standard /trunk, /branches, /tags structure.")
     }
     
     parser.parse(args, Options())
@@ -72,13 +71,14 @@ object FileRevs extends Command {
     if (options.allBranches == false && options.branches.isEmpty)
       Nil
     else {
-      val prefixes = svn.getBranchPrefixes().sorted
+      val allPrefixes = svn.getBranchPrefixes() ::: svn.getTagPrefixes()
+      val branchPrefixes = svn.getBranchPrefixes().sorted
       def acceptable(branch: String): Boolean = {
-        !prefixes.contains(branch)  &&
+        !allPrefixes.contains(branch)  &&
         (options.allBranches || (options.branches.exists(_.contains(branch))))
       }
       for {
-        prefix <- prefixes
+        prefix <- branchPrefixes
         entry  <- svn.pathList(joinPaths(rootUrl, prefix)).head.entries
         branch = joinPaths(prefix, entry.name)
         if acceptable(branch)
@@ -90,11 +90,18 @@ object FileRevs extends Command {
     if (options.allTags == false && options.tags.isEmpty)
       Nil
     else {
-      val tagEntries = svn.pathList(joinPaths(rootUrl, "tags")).head.entries
-      if (options.allTags)
-        tagEntries map (e => s"tags/${e.name}")
-      else
-        tagEntries filter { entry => options.tags.exists(_.contains(entry.name)) } map (e => s"tags/${e.name}")
+      val allPrefixes = svn.getBranchPrefixes() ::: svn.getTagPrefixes()
+      val tagPrefixes = svn.getTagPrefixes().sorted
+      def acceptable(tag: String): Boolean = {
+        !allPrefixes.contains(tag)  &&
+        (options.allTags || (options.tags.exists(_.contains(tag))))
+      }
+      for {
+        prefix <- tagPrefixes
+        entry  <- svn.pathList(joinPaths(rootUrl, prefix)).head.entries
+        tag = joinPaths(prefix, entry.name)
+        if acceptable(tag)
+      } yield tag
     }
   }
   
@@ -108,7 +115,7 @@ object FileRevs extends Command {
   //  We must determine the path to the file relative
   //  to its subversion prefix, where the prefix is one of:
   //    ^/trunk
-  //    ^/tags/<tag-name>
+  //    ^/<tag-prfix>/<tag-name>
   //    ^/<branch-prefix>/<branch-name>
   //  
   private def getSvnRelativePath(relativeUrl: String, locations: List[String]): String = {
