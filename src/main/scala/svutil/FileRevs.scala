@@ -106,10 +106,11 @@ object FileRevs extends Command {
   }
   
   private def getTrunk(rootUrl: String): String = {
-    if (svn.pathList(rootUrl).head.entries exists (_.name == "trunk"))
-      "trunk"
+    val trunkPrefix = svn.getTrunkPrefix()
+    if (svn.pathList(rootUrl).head.entries exists (_.name == trunkPrefix))
+      trunkPrefix
     else
-      generalError(s"Cannot find repository trunk: ${joinPaths(rootUrl, "trunk")}")
+      generalError(s"Cannot find repository trunk prefix '$trunkPrefix': ${joinPaths(rootUrl, "trunk")}")
   }
   
   //  We must determine the path to the file relative

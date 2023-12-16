@@ -314,80 +314,63 @@ object svn {
   //  The branch prefixes are stored in .sv/branch_prefixes.json
   //  Same goes for ^/tags
   
-  private def branchPrefixesFile = getDataDirectory() / "branch_prefixes.json"
-  private def tagPrefixesFile    = getDataDirectory() / "tag_prefixes.json"
+  private def prefixesFile = getDataDirectory() / "prefixes.json"
 
-  def loadBranchPrefixes(): List[String] = {
-    if (os.isFile(branchPrefixesFile)) {
-      try read[List[String]](branchPrefixesFile.toIO)
+  private case class Prefixes(trunkPrefix: String, branchPrefixes: List[String], tagPrefixes: List[String])
+  
+  private object Prefixes {
+    implicit val rw: RW[Prefixes] = macroRW
+  }
+  
+  private def loadPrefixes(): Prefixes = {
+    if (os.isFile(prefixesFile)) {
+      try
+        read[Prefixes](prefixesFile.toIO) 
       catch {
         case e: Throwable => 
-          generalError(s"Error branch prefixes ($branchPrefixesFile): ${e.getMessage}")
+          generalError(s"Error loading prefixes file ($prefixesFile): ${e.getMessage}")
       }
     }
     else
-      Nil
+      Prefixes("trunk", List("branches"), List("tags"))
   }
+
+  private def savePrefixes(prefixes: Prefixes): Unit = {
+    try {
+      val ostream = os.write.over.outputStream(prefixesFile)
+      try writeToOutputStream(prefixes, ostream, indent = 2)
+      finally ostream.close()
+    }
+    catch {
+      case e: Throwable =>
+        generalError(s"Error writing prefixes file ($prefixesFile): ${e.getMessage}")
+    }
+  }  
+
+  //  Normally the trunk prefix is "trunk"
+  //  but we allow the user to configure a non-standard trunk location.
+  def getTrunkPrefix(): String = loadPrefixes().trunkPrefix
+  def getBranchPrefixes(): List[String] = loadPrefixes().branchPrefixes
+  def getTagPrefixes(): List[String] = loadPrefixes().tagPrefixes
   
-  def saveBranchPrefixes(branchPrefixes: List[String]): Unit = {
-    val prefixes = branchPrefixes match {
+  def setTrunkPrefix(trunkPrefix: String): Unit = {
+    savePrefixes(loadPrefixes().copy(trunkPrefix = trunkPrefix))
+  }
+
+  def setBranchPrefixes(prefixes: List[String]): Unit = {
+    val prefixList = prefixes match {
       case Nil => List("branches")
-      case list => list
+      case xs  => xs.distinct
     }
-    try {
-      val ostream = os.write.over.outputStream(branchPrefixesFile)
-      try writeToOutputStream(prefixes.distinct, ostream, indent = 2)
-      finally ostream.close()
-    }
-    catch {
-      case e: Throwable =>
-        generalError(s"Error branch prefixes ($branchPrefixesFile): ${e.getMessage}")
-    }
+    savePrefixes(loadPrefixes().copy(branchPrefixes = prefixList))
   }  
 
-  def loadTagPrefixes(): List[String] = {
-    if (os.isFile(tagPrefixesFile)) {
-      try read[List[String]](tagPrefixesFile.toIO)
-      catch {
-        case e: Throwable => 
-          generalError(s"Error tag prefixes ($tagPrefixesFile): ${e.getMessage}")
-      }
-    }
-    else
-      Nil
-  }
-  
-  def saveTagPrefixes(tagPrefixes: List[String]): Unit = {
-    val prefixes = tagPrefixes match {
+  def setTagPrefixes(prefixes: List[String]): Unit = {
+    val prefixList = prefixes match {
       case Nil => List("tags")
-      case list => list
+      case xs  => xs.distinct
     }
-    try {
-      val ostream = os.write.over.outputStream(tagPrefixesFile)
-      try writeToOutputStream(prefixes.distinct, ostream, indent = 2)
-      finally ostream.close()
-    }
-    catch {
-      case e: Throwable =>
-        generalError(s"Error tag prefixes ($tagPrefixesFile): ${e.getMessage}")
-    }
+    savePrefixes(loadPrefixes().copy(tagPrefixes = prefixList))
   }  
-
-  //  Returns the list of branch prefixes.
-  //  If the user has not created custom branch prefixes
-  //  then we return the default prefix: branches
-  def getBranchPrefixes(): List[String] = loadBranchPrefixes() match {
-    case Nil => "branches"::Nil
-    case list => list
-  }
-  
-  //  Returns the list of tag prefixes.
-  //  If the user has not created custom tag prefixes
-  //  then we return the default prefix: tags
-  def getTagPrefixes(): List[String] = loadTagPrefixes() match {
-    case Nil => "tags"::Nil
-    case list => list
-  }
-
 }
 

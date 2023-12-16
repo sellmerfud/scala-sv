@@ -201,9 +201,9 @@ object Bisect extends Command {
 
   //  We try to log the revision for the current working copy directory.
   //  If the revision does not exist in the repo we will get an exception
-  //  If the revision does exist in the repo but is not on the trunk/branch for
-  //  the working copy then we either get an emtpy list or we get an entry
-  //  with a revision that does not match (it is the last revision where a copy was made)
+  //  If the revision does exist in the repo but is not in the working copy
+  //  then we either get an emtpy list or we get an entry with a revision
+  //  that does not match (it is the last revision where a copy was made)
   //
   //  For HEAD, BASE, COMMITTED, PREV we have to specify a range and limit
   //  in order for subversion to return the log entry.

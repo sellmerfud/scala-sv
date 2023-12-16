@@ -23,6 +23,7 @@ object Branch extends Command {
     remBranchPrefixes: Vector[String] = Vector.empty,
     addTagPrefixes: Vector[String]    = Vector.empty,
     remTagPrefixes: Vector[String]    = Vector.empty,
+    trunkPrefix: Option[String]       = None,
     listPrefixes: Boolean             = false,
     path:        String               = ".") {
   
@@ -33,6 +34,7 @@ object Branch extends Command {
       remBranchPrefixes.nonEmpty ||
       addTagPrefixes.nonEmpty    ||
       remTagPrefixes.nonEmpty    ||
+      trunkPrefix.nonEmpty       ||
       listPrefixes
 
   }
@@ -97,6 +99,14 @@ object Branch extends Command {
         options.copy(remTagPrefixes = options.remTagPrefixes :+ cleanPrefix)
       }
 
+      reqd[String]("", "--set-trunk-prefix=<prefix>", "Set the trunk prefix") {
+        (prefix, options) =>
+        if (!prefix.startsWith("^/"))
+          throw new InvalidArgumentException("Trunk prefix must start with ^/")
+        val cleanPrefix = prefix.substring(2).chomp("/")
+        options.copy(trunkPrefix = Some(cleanPrefix))
+      }
+
       flag("", "--list-prefixes", "List all branch and tag prefixes") {
         (options) =>
         options.copy(listPrefixes = true)
@@ -119,28 +129,35 @@ object Branch extends Command {
   
   private def prefixOperations(options: Options): Unit = {
 
+    for (trunkPrefix <- options.trunkPrefix)
+      svn.setTrunkPrefix(trunkPrefix)
+
     if (options.addBranchPrefixes.nonEmpty || options.remBranchPrefixes.nonEmpty) {
-      var prefixes = svn.loadBranchPrefixes()
+      var prefixes = svn.getBranchPrefixes()
 
       prefixes = prefixes :++ options.addBranchPrefixes
       prefixes = prefixes.filterNot { prefix =>
         options.remBranchPrefixes.contains(prefix)
       }
-      svn.saveBranchPrefixes(prefixes)
+      svn.setBranchPrefixes(prefixes)
     }
 
     if (options.addTagPrefixes.nonEmpty || options.remTagPrefixes.nonEmpty) {
-      var prefixes = svn.loadTagPrefixes()
+      var prefixes = svn.getTagPrefixes()
 
       prefixes = prefixes :++ options.addTagPrefixes
       prefixes = prefixes.filterNot { prefix =>
         options.remTagPrefixes.contains(prefix)
       }
-      svn.saveTagPrefixes(prefixes)
+      svn.setTagPrefixes(prefixes)
     }
     
     if (options.listPrefixes) {
-      println("Branch prefixes")
+      println("Trunk prefix")
+      println("-----------------------------------------")
+      println(s"^/${svn.getTrunkPrefix()}")
+
+      println("\nBranch prefixes")
       println("-----------------------------------------")
       for (prefix <- svn.getBranchPrefixes().sorted)
         println(s"^/$prefix")
@@ -182,8 +199,9 @@ object Branch extends Command {
     def baseUrl: String = {
       val branches = sortedByLength(svn.getBranchPrefixes()).mkString("|")
       val tags     = sortedByLength(svn.getTagPrefixes()).mkString("|")
+      val trunk    = svn.getTrunkPrefix()
       
-      val baseMatch = s"""(.*?)/(?:trunk|$branches|$tags)(?:/.*)?""".r
+      val baseMatch = s"""(.*?)/(?:$trunk|$branches|$tags)(?:/.*)?""".r
       svn.info(options.path).url match {
         case baseMatch(base) => base
         case _               => generalError(s"Cannot determine the base URL for ${options.path}")
