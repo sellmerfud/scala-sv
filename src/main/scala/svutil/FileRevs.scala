@@ -146,9 +146,10 @@ object FileRevs extends Command {
   // 7630                7630
   
   private def showResults(rootUrl: String, pathEntry: SvnInfo, locations: List[String]): Unit = {
+    import scala.collection.parallel.CollectionConverters._
     case class Result(locationName: String, info: Option[SvnInfo])
     val relPath = getSvnRelativePath(pathEntry.relativeUrl, locations)
-    val results = for (location <- locations) yield {
+    val resultsPar = for (location <- locations.par) yield {
       val entryPath = joinPaths(rootUrl, location, relPath)
       
       Try(svn.info(entryPath, Some("HEAD"))) match {
@@ -156,7 +157,7 @@ object FileRevs extends Command {
         case Failure(e)    => Result(s"^/$location", None)
       }
     }
-    
+    val results = resultsPar.toList
     val Location        = "Location"
     val Revision        = "Revision"
     val Author          = "Author"
