@@ -194,25 +194,14 @@ object Branch extends Command {
     }
     
     // Returns list of strings sorted by length. Longest first.
-    def sortedByLength(list: List[String]): List[String] = list.sortBy(p => -p.length)
 
-    def baseUrl: String = {
-      val branches = sortedByLength(svn.getBranchPrefixes()).mkString("|")
-      val tags     = sortedByLength(svn.getTagPrefixes()).mkString("|")
-      val trunk    = svn.getTrunkPrefix()
-      
-      val baseMatch = s"""(.*?)/(?:$trunk|$branches|$tags)(?:/.*)?""".r
-      svn.info(options.path).url match {
-        case baseMatch(base) => base
-        case _               => generalError(s"Cannot determine the base URL for ${options.path}")
-      }
-    }
+    val rootUrl = svn.info(options.path).rootUrl
     
     if (options.listBranches)
-      listEntries("Branches", baseUrl, svn.getBranchPrefixes().sorted, options.branchesRegex)
+      listEntries("Branches", rootUrl, svn.getBranchPrefixes().sorted, options.branchesRegex)
     
     if (options.listTags)
-      listEntries("Tags", baseUrl, svn.getTagPrefixes().sorted, options.tagsRegex)
+      listEntries("Tags", rootUrl, svn.getTagPrefixes().sorted, options.tagsRegex)
   }
   
   private def showCurrentBranch(options: Options): Unit = {

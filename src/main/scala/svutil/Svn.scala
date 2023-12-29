@@ -169,7 +169,7 @@ object svn {
         None
       LogPath(
         path     = pathNode.head.text,
-        kind     = pathNode.attributes("action").head.text,
+        kind     = pathNode.attributes("kind").head.text,
         action   = pathNode.attributes("action").head.text,
         textMods = pathNode.attributes("text-mods").head.text == "true",
         propMods = pathNode.attributes("prop-mods").head.text == "true",
